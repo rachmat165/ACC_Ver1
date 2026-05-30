@@ -1,0 +1,10 @@
+tenant:
+  id: contoh-tenant
+  name: "Klien Contoh"
+  branding:
+    logo: ""
+    warna_primer: "#4F46E5"
+  kontak:
+    email: ""
+    telepon: ""
+  knowledge_path: knowledge/

@@ -1,0 +1,25 @@
+# Definisi tugas terjadwal (cron). Dieksekusi oleh scripts/cron-runner.
+jobs:
+  - id: heartbeat
+    cron: "*/30 * * * *"
+    action: "Jalankan HEARTBEAT.md: cek antrian, jadwal, target, tindak lanjut"
+
+  - id: laporan-harian
+    cron: "0 7 * * *"
+    skill: laporan-kerja
+    action: "Ringkas aktivitas kemarin & kirim ke operator via WhatsApp"
+
+  - id: prospek-mingguan
+    cron: "0 9 * * 1"
+    skill: riset
+    action: "Riset 10 prospek baru sesuai ICP & susun daftar outreach"
+
+  - id: rekap-keuangan
+    cron: "0 17 28-31 * *"
+    skill: laporan-keuangan-psak
+    action: "Tarik data transaksi, susun draf laba rugi & posisi keuangan"
+
+  - id: perbaikan-otomatis-malam
+    cron: "0 1 * * *"
+    skill: self-healing-code
+    action: "Jalankan ulang test suite proyek; bila ada yang gagal, perbaiki otomatis dan laporkan"

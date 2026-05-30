@@ -1,0 +1,29 @@
+# Konfigurasi Arunika Command Centre
+company:
+  name: "PT. Arunika Teknologi Global"
+  director: "Adang A. Kunandar"
+  email: "corsec@arunika2045.com"
+  website: "arunika2045.com"
+
+provider:
+  active: anthropic        # anthropic | openai | openrouter | gemini | mcp
+  temperature: 0.4
+  max_tokens: 4096
+
+# Perutean tugas -> tingkat model (hemat biaya)
+routing:
+  riset: primary
+  presentasi: primary
+  proposal: primary
+  surat_penawaran: fallback
+  laporan_kerja: fallback
+  laporan_keuangan: primary   # tugas presisi -> model terkuat
+  balasan_cepat: fallback
+
+agent:
+  heartbeat_minutes: 30
+  language: id
+  require_human_approval: true   # skill baru & dokumen resmi minta persetujuan
+
+multitenant:
+  default_tenant: contoh-tenant

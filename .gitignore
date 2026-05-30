@@ -1,0 +1,12 @@
+.cache/
+.venv/
+__pycache__/
+*.pyc
+data/.env
+data/sessions/*
+data/memories/*
+!data/sessions/.gitkeep
+!data/memories/.gitkeep
+data/tenants/*/outputs/*
+data/tenants/*/memories/*
+build/

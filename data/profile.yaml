@@ -1,0 +1,30 @@
+# Profil Lembaga ACC - dipakai otomatis di semua dokumen
+# Edit kapan saja: launch.bat -> [8] Setup Profil Lembaga
+tipe: PT
+nama: Arunika Teknologi Global
+nama_singkat: Arunika
+tagline: ""
+bidang: Teknologi & AI
+pimpinan_nama: Adang A. Kunandar
+pimpinan_jabatan: Direktur Utama
+alamat:
+  jalan: Jl. Calung No. 7
+  kota: Kota Bandung
+  provinsi: Jawa Barat
+  kode_pos: ""
+  negara: Indonesia
+kontak:
+  email: corsec@arunika2045.com
+  telepon: ""
+  whatsapp: ""
+  website: arunika2045.com
+legal:
+  npwp: ""
+  nib: ""
+  akta_pendirian: ""
+visi: ""
+misi: ""
+branding:
+  logo_path: ""
+  warna_primer: "#4F46E5"
+  warna_aksen: "#F59E0B"

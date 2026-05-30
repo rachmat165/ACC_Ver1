@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "google-drive": { "type": "url", "url": "https://drivemcp.googleapis.com/mcp/v1", "enabled": false },
+    "gmail":        { "type": "url", "url": "https://gmailmcp.googleapis.com/mcp/v1", "enabled": false },
+    "canva":        { "type": "url", "url": "https://mcp.canva.com/mcp", "enabled": false },
+    "whatsapp":     { "type": "url", "url": "https://REPLACE-WA-PROVIDER/mcp", "enabled": false },
+    "akunting-erp": { "type": "url", "url": "https://REPLACE-ERP-KLIEN/mcp", "enabled": false }
+  }
+}

@@ -1,0 +1,16 @@
+# Inti
+pyyaml>=6.0
+python-dotenv>=1.0.0
+rich>=13.0.0
+# Penjadwalan
+croniter>=2.0.0
+schedule>=1.2.0
+# Provider model (pasang sesuai kebutuhan)
+anthropic>=0.39.0
+openai>=1.0.0
+# Self-Healing Code Loop
+pytest>=8.0.0
+
+# Util
+requests>=2.31.0
+twilio>=9.0.0

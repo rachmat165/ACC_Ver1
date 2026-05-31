@@ -179,16 +179,32 @@ def send_wa(to: str, body: str) -> bool:
         print(f"  {dim('To    :')} {to}  {dim(f'({len(parts)} bagian, {len(body)} char)')}")
 
         for idx, part in enumerate(parts):
-            msg = client.messages.create(from_=from_wa, body=part, to=to_wa)
-            print(f"  {green('✔')} Bagian {idx+1}/{len(parts)} terkirim — SID: {msg.sid[:12]}...")
-            # Jeda antar pesan agar urutan terjaga di WhatsApp
+            try:
+                msg = client.messages.create(from_=from_wa, body=part, to=to_wa)
+                print(f"  {green('✔')} Bagian {idx+1}/{len(parts)} terkirim — SID: {msg.sid[:12]}...")
+            except Exception as e:
+                # Klasifikasi error agar jelas (bukan traceback panjang)
+                try:
+                    from doc_utils import classify_twilio_error
+                    code, friendly, is_quota = classify_twilio_error(str(e))
+                except Exception:
+                    code, friendly, is_quota = None, str(e)[:120], False
+                log_err(f"Gagal kirim bagian {idx+1}/{len(parts)}: {friendly}")
+                if is_quota:
+                    print(f"  {yellow('⚠ Kuota Twilio habis — berhenti kirim sisa pesan.')}")
+                    print(f"  {dim('Solusi: upgrade akun Twilio, atau pakai format PDF (1 pesan).')}")
+                return False
             if idx < len(parts) - 1:
                 time.sleep(1.2)
         return True
 
     except Exception as e:
-        log_err(f"REST API gagal: {e}")
-        traceback.print_exc()
+        try:
+            from doc_utils import classify_twilio_error
+            _, friendly, _ = classify_twilio_error(str(e))
+        except Exception:
+            friendly = str(e)[:120]
+        log_err(f"REST API gagal: {friendly}")
         return False
 
 # ── AI engine ─────────────────────────────────────────────────
@@ -246,11 +262,17 @@ def ai_worker(phone: str, name: str, body: str, mgr, fmt: str = "wa"):
 
         else:  # wa — rapikan markdown ke format WhatsApp
             wa_reply = to_whatsapp(reply)
-            if len(wa_reply) > 6000:
-                wa_reply += ("\n\n💡 _Jawaban panjang. Ketik /pdf atau /txt untuk "
-                             "versi file rapi yang bisa diunduh._")
-            print(f"  {dim('Mengirim hasil (format WhatsApp)...')}")
-            send_wa(phone, wa_reply)
+            # Hemat kuota: jawaban sangat panjang (butuh banyak pesan) -> PDF 1 link
+            # Aktif via ACC_WA_LONG_AS_PDF=true (default true untuk akun trial)
+            long_as_pdf = os.environ.get("ACC_WA_LONG_AS_PDF", "true").lower() == "true"
+            if long_as_pdf and BOT_OK and len(wa_reply) > 1500:
+                print(f"  {dim('Jawaban panjang -> kirim sbg PDF (hemat kuota)...')}")
+                file_msg = bot.make_pdf(session, ACC_HOME)
+                preview  = to_whatsapp(reply[:500]) + "\n\n_..._"
+                send_wa(phone, f"{preview}\n\n{file_msg}")
+            else:
+                print(f"  {dim('Mengirim hasil (format WhatsApp)...')}")
+                send_wa(phone, wa_reply)
 
     except Exception as e:
         log_err(f"ai_worker crash: {e}")
@@ -302,11 +324,15 @@ def create_app():
         log_in(ts, name, phone, body, model, session.skill)
 
         def _start_ai(query: str, fmt: str) -> str:
-            """Mulai worker AI dengan format tertentu, kembalikan teks ACK."""
+            """Mulai worker AI dengan format tertentu, kembalikan teks ACK.
+            ACK bisa dimatikan via ACC_SEND_ACK=false untuk hemat kuota Twilio."""
             print(f"  {dim(f'→ AI thread [{fmt.upper()}] dimulai...')}")
             threading.Thread(target=ai_worker,
                              args=(phone, name, query, mgr, fmt),
                              daemon=True).start()
+            # Hemat kuota: kalau ACK dimatikan, balas kosong (tak makan kuota)
+            if os.environ.get("ACC_SEND_ACK", "true").lower() != "true":
+                return ""
             skill_txt = f"\nSkill: _{session.skill}_" if session.skill else ""
             fmt_label = {"wa":"💬 WhatsApp","pdf":"📄 PDF","txt":"📝 TXT"}.get(fmt, fmt)
             return (f"⏳ *Sedang memproses...*\n"

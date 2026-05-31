@@ -109,3 +109,36 @@ def save_public_base_url(acc_home: Path, url: str):
     f = Path(acc_home) / "data" / "tunnel_url.txt"
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(url.strip().rstrip("/"), encoding="utf-8")
+
+
+# ── Klasifikasi error Twilio jadi pesan jelas ────────────────
+def classify_twilio_error(err_text: str) -> tuple[int | None, str, bool]:
+    """
+    Ubah pesan error Twilio jadi (kode, pesan_jelas, is_quota).
+    is_quota=True artinya kuota habis (stop kirim pesan lain).
+    """
+    text = str(err_text)
+    m = re.search(r"errors/(\d{4,5})", text)
+    if not m:
+        m = re.search(r"\b(\d{5})\b", text)
+    code = int(m.group(1)) if m else None
+
+    hints = {
+        63038: ("⚠️ KUOTA TWILIO HABIS — batas 50 pesan/hari (akun trial) "
+                "tercapai. Reset besok, atau upgrade akun Twilio untuk "
+                "unlimited.", True),
+        63018: ("⚠️ Rate limit Twilio (terlalu cepat). Coba beberapa saat lagi.",
+                True),
+        63016: ("Nomor penerima belum join sandbox. Kirim 'join <kode>' ke "
+                "+14155238886 dulu.", False),
+        21617: ("Pesan terlalu panjang (>1600 char). Sistem akan memecah/PDF.",
+                False),
+        21211: ("Format nomor tujuan tidak valid (harus +<kode negara><nomor>).",
+                False),
+        20003: ("Auth gagal — cek TWILIO_AUTH_TOKEN di data/.env.", False),
+        63007: ("Channel WhatsApp tidak ditemukan / belum aktif.", False),
+    }
+    if code in hints:
+        msg, is_quota = hints[code]
+        return (code, msg, is_quota)
+    return (code, f"Error Twilio{f' {code}' if code else ''}: {text[:120]}", False)

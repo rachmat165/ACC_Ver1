@@ -115,19 +115,47 @@ def log_cmd(r): print(f"  {green('✔')} {dim('Perintah:')} {r[:80]}")
 def log_err(msg):
     print(f"\n  {bold(red('ERROR'))} {msg}")
 
+# ── Pecah pesan panjang jadi beberapa bagian (<1500 char) ────
+WA_CHUNK = 1500   # aman di bawah batas Twilio 1600
+
+def split_message(text: str, limit: int = WA_CHUNK) -> list[str]:
+    """Pecah teks panjang di batas paragraf/kalimat agar rapi."""
+    if len(text) <= limit:
+        return [text]
+
+    chunks, current = [], ""
+    for para in text.split("\n"):
+        # Paragraf sendiri lebih panjang dari limit → pecah per kalimat
+        if len(para) > limit:
+            for sentence in para.replace(". ", ".\n").split("\n"):
+                if len(current) + len(sentence) + 1 > limit:
+                    if current: chunks.append(current.strip())
+                    current = sentence
+                else:
+                    current += ("\n" if current else "") + sentence
+        else:
+            if len(current) + len(para) + 1 > limit:
+                chunks.append(current.strip())
+                current = para
+            else:
+                current += ("\n" if current else "") + para
+    if current.strip():
+        chunks.append(current.strip())
+
+    # Tambah penanda bagian (1/3) dst.
+    total = len(chunks)
+    if total > 1:
+        chunks = [f"*[{i+1}/{total}]*\n{c}" for i, c in enumerate(chunks)]
+    return chunks
+
+
 # ── Kirim via Twilio REST API ─────────────────────────────────
 def send_wa(to: str, body: str) -> bool:
-    """Kirim pesan WhatsApp via Twilio REST API (untuk background reply)."""
+    """Kirim pesan WhatsApp via Twilio REST API. Otomatis pecah jika panjang."""
     try:
         sid   = os.environ.get("TWILIO_ACCOUNT_SID","").strip()
         token = os.environ.get("TWILIO_AUTH_TOKEN","").strip()
         from_ = os.environ.get("WA_FROM_NUMBER","+14155238886").strip()
-
-        # Debug: tampilkan credential (samarkan token)
-        print(f"  {dim('SID   :')} {sid[:10]}...")
-        print(f"  {dim('Token :')} {token[:6]}...")
-        print(f"  {dim('From  :')} {from_}")
-        print(f"  {dim('To    :')} {to}")
 
         if not sid or not token:
             log_err("TWILIO_ACCOUNT_SID atau TWILIO_AUTH_TOKEN kosong di data/.env!")
@@ -136,12 +164,19 @@ def send_wa(to: str, body: str) -> bool:
             log_err(f"TWILIO_ACCOUNT_SID tidak valid (harus mulai 'AC'): {sid[:10]}")
             return False
 
-        to_wa   = f"whatsapp:{to}"   if not to.startswith("whatsapp:")   else to
+        to_wa   = f"whatsapp:{to}"    if not to.startswith("whatsapp:")    else to
         from_wa = f"whatsapp:{from_}" if not from_.startswith("whatsapp:") else from_
 
         client = TwilioClient(sid, token)
-        msg    = client.messages.create(from_=from_wa, body=body, to=to_wa)
-        print(f"  {green('✔')} REST API OK — SID: {msg.sid}  Status: {msg.status}")
+        parts  = split_message(body)
+        print(f"  {dim('To    :')} {to}  {dim(f'({len(parts)} bagian, {len(body)} char)')}")
+
+        for idx, part in enumerate(parts):
+            msg = client.messages.create(from_=from_wa, body=part, to=to_wa)
+            print(f"  {green('✔')} Bagian {idx+1}/{len(parts)} terkirim — SID: {msg.sid[:12]}...")
+            # Jeda antar pesan agar urutan terjaga di WhatsApp
+            if idx < len(parts) - 1:
+                time.sleep(1.2)
         return True
 
     except Exception as e:
@@ -180,8 +215,10 @@ def ai_worker(phone: str, name: str, body: str, mgr):
         mgr.add_message(phone, "user",      body)
         mgr.add_message(phone, "assistant", reply)
 
-        if len(reply) > 3800:
-            reply = reply[:3800] + "\n\n_[Dipotong. Kirim /pdf untuk versi lengkap]_"
+        # Jawaban sangat panjang → tawarkan PDF (hemat pesan WA)
+        if len(reply) > 6000:
+            reply += ("\n\n💡 _Jawaban panjang. Kirim /pdf untuk versi PDF rapi "
+                      "yang bisa diunduh._")
 
         print(f"  {dim('Mengirim hasil via REST API...')}")
         send_wa(phone, reply)

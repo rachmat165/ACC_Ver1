@@ -171,6 +171,82 @@ def generate_pdf_from_text(
     return str(output_path)
 
 
+def generate_txt_from_text(
+    content: str,
+    judul: str = None,
+    output_dir: Path = None,
+    filename: str = None,
+    company_name: str = "PT. Arunika Teknologi Global",
+) -> str:
+    """
+    Generate file TXT terstruktur dari teks/markdown.
+    Markdown disederhanakan jadi teks rapi dengan garis & indentasi.
+
+    Returns: Path absolut file TXT.
+    """
+    if output_dir is None:
+        output_dir = Path.cwd() / "data" / "output"
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auto-detect judul
+    if not judul:
+        lines = [l.strip() for l in content.split("\n") if l.strip()]
+        if lines:
+            first = lines[0]
+            judul = re.sub(r"^#+\s*", "", first)[:60]
+        else:
+            judul = "Dokumen Arunika"
+
+    if not filename:
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        safe = re.sub(r"[^a-zA-Z0-9\-_]", "_", judul[:30]).strip("_")
+        filename = f"{ts}_{safe}.txt"
+
+    output_path = output_dir / filename
+
+    # Konversi markdown -> teks rapi
+    W = 70  # lebar garis
+    out = []
+    out.append("=" * W)
+    out.append(company_name.center(W))
+    out.append(f"Dibuat: {datetime.now().strftime('%d %B %Y, %H:%M')} WIB".center(W))
+    out.append("=" * W)
+    out.append("")
+    out.append(judul.upper().center(W))
+    out.append("-" * W)
+    out.append("")
+
+    for style, text in _strip_markdown(content):
+        if style == "empty":
+            out.append("")
+        elif style == "h1":
+            out.append("")
+            out.append("#" * 3 + " " + text.upper())
+            out.append("=" * min(len(text) + 4, W))
+        elif style == "h2":
+            out.append("")
+            out.append(">> " + text.upper())
+            out.append("-" * min(len(text) + 3, W))
+        elif style == "h3":
+            out.append("")
+            out.append("  " + text)
+        elif style == "bold":
+            out.append("** " + text + " **")
+        elif style == "bullet":
+            out.append("   - " + text)
+        else:
+            out.append(text)
+
+    out.append("")
+    out.append("=" * W)
+    out.append(f"Arunika Command Centre | {company_name}".center(W))
+    out.append("=" * W)
+
+    output_path.write_text("\n".join(out), encoding="utf-8")
+    return str(output_path)
+
+
 # ============ CLI ============
 if __name__ == "__main__":
     import sys

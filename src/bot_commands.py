@@ -131,8 +131,9 @@ def fmt_menu(acc_home: Path, session) -> str:
         f"PT. Arunika Teknologi Global\n"
         f"{LINE}\n\n"
         f"*Status aktif:*\n"
-        f"  🧠 Model : {model_active}\n"
-        f"  📚 Skill : {skill_active}\n\n"
+        f"  🧠 Model  : {model_active}\n"
+        f"  📚 Skill  : {skill_active}\n"
+        f"  📄 Format : {FORMAT_LABELS.get(session.output_format, session.output_format)}\n\n"
         f"{LINE}\n"
         f"*📚 SKILL TERSEDIA:*"
         f"{skill_lines}\n\n"
@@ -147,8 +148,10 @@ def fmt_menu(acc_home: Path, session) -> str:
         f"  /model gpt4o         — GPT-4o 🟢\n"
         f"  /model local         — LM Studio 💻\n\n"
         f"{LINE}\n"
-        f"*📄 DOKUMEN PDF:*\n"
-        f"  /pdf          — export respons terakhir\n"
+        f"*📄 FORMAT JAWABAN:*\n"
+        f"  /format       — pilih WA / PDF / TXT\n"
+        f"  /pdf          — respons terakhir ke PDF\n"
+        f"  /txt          — respons terakhir ke TXT\n"
         f"  /pdf <teks>   — buat konten baru ke PDF\n\n"
         f"{LINE}\n"
         f"*⚙️ SESI & INFO:*\n"
@@ -220,6 +223,7 @@ def fmt_status(session, acc_home: Path) -> str:
         f"   Provider: {model_info.get('provider', '-')}\n"
         f"   Model   : {model_info.get('model', '-')}\n"
         f"📚 Skill  : *{session.skill or '(mode umum)'}*\n"
+        f"📄 Format : *{FORMAT_LABELS.get(session.output_format, session.output_format)}*\n"
         f"{LINE}\n"
         f"💬 Riwayat     : {pairs} pesan\n"
         f"🕐 Terakhir    : {last}\n"
@@ -344,6 +348,20 @@ def set_model(model_key: str, session, session_mgr) -> str:
     )
 
 
+def _file_link(fname: str, kind: str) -> str:
+    """Buat pesan link download untuk file di data/output."""
+    webhook_url = os.environ.get("WA_WEBHOOK_URL", "").rstrip("/")
+    if webhook_url:
+        url = f"{webhook_url}/files/{fname}"
+        return f"📄 *{kind} Siap Diunduh!*\n\n🔗 {url}\n\n_File: {fname}_"
+    return (
+        f"📄 *{kind} Tersimpan*\n\n"
+        f"File: {fname}\n"
+        f"Lokasi: data/output/{fname}\n\n"
+        f"_Isi WA_WEBHOOK_URL di .env agar bisa diunduh via WhatsApp._"
+    )
+
+
 def make_pdf(session, acc_home: Path) -> str:
     """Generate PDF dari respons AI terakhir di sesi."""
     try:
@@ -358,22 +376,80 @@ def make_pdf(session, acc_home: Path) -> str:
             "Kirim pertanyaan dulu, lalu /pdf setelah menerima respons.\n"
             "Atau: /pdf <teks yang ingin dijadikan PDF>"
         )
-
     try:
         path = generate_pdf_from_text(last, output_dir=acc_home / "data" / "output")
-        fname = Path(path).name
-        webhook_url = os.environ.get("WA_WEBHOOK_URL", "").rstrip("/")
-        if webhook_url:
-            url = f"{webhook_url}/files/{fname}"
-            return f"📄 *PDF Siap!*\n\nFile: {fname}\n🔗 {url}"
-        return (
-            f"📄 *PDF Disimpan*\n\n"
-            f"File: {fname}\n"
-            f"Lokasi: data/output/{fname}\n\n"
-            f"_Isi WA_WEBHOOK_URL di .env agar PDF bisa diunduh langsung._"
-        )
+        return _file_link(Path(path).name, "PDF")
     except Exception as e:
         return f"❌ Gagal buat PDF: {e}"
+
+
+def make_txt(session, acc_home: Path) -> str:
+    """Generate TXT dari respons AI terakhir di sesi."""
+    try:
+        from pdf_generator import generate_txt_from_text
+    except ImportError:
+        return "❌ Modul generator belum tersedia."
+
+    last = session.last_ai_response()
+    if not last:
+        return "❌ Belum ada respons untuk dijadikan TXT. Kirim pertanyaan dulu."
+    try:
+        path = generate_txt_from_text(last, output_dir=acc_home / "data" / "output")
+        return _file_link(Path(path).name, "TXT")
+    except Exception as e:
+        return f"❌ Gagal buat TXT: {e}"
+
+
+# ── Format jawaban (WA / PDF / TXT) ──────────────────────────
+FORMAT_LABELS = {
+    "wa":  "💬 WhatsApp (teks langsung)",
+    "pdf": "📄 PDF (siap unduh)",
+    "txt": "📝 TXT (siap unduh)",
+    "ask": "❓ Tanya setiap kali",
+}
+
+def parse_format_choice(text: str) -> str | None:
+    """Ubah input user jadi format: wa/pdf/txt. None jika tidak cocok."""
+    t = text.strip().lower()
+    mapping = {
+        "1": "wa", "wa": "wa", "whatsapp": "wa", "teks": "wa", "text": "wa", "chat": "wa",
+        "2": "pdf", "pdf": "pdf", "dokumen": "pdf",
+        "3": "txt", "txt": "txt", "teks file": "txt",
+    }
+    return mapping.get(t)
+
+
+def fmt_format_menu(query_preview: str) -> str:
+    return (
+        f"📋 *PILIH FORMAT JAWABAN*\n"
+        f"{LINE}\n"
+        f"Pertanyaan Anda:\n_{query_preview[:100]}_\n\n"
+        f"Balas dengan angka:\n\n"
+        f"  *1* — 💬 WhatsApp (teks langsung)\n"
+        f"  *2* — 📄 PDF (dokumen siap unduh)\n"
+        f"  *3* — 📝 TXT (file teks siap unduh)\n\n"
+        f"{LINE}\n"
+        f"_Tip: ketik_ */format wa* _(atau pdf/txt) untuk_\n"
+        f"_set format tetap, tanpa ditanya lagi._"
+    )
+
+
+def set_format(fmt_input: str, session, session_mgr) -> str:
+    fmt = fmt_input.strip().lower()
+    if fmt in ("ask", "tanya", "nanya"):
+        session.output_format = "ask"
+        session_mgr.save(session)
+        return ("✅ Format diatur ke *Tanya setiap kali*.\n"
+                "Setiap pertanyaan akan ditanya dulu mau WA/PDF/TXT.")
+    mapped = parse_format_choice(fmt) or (fmt if fmt in ("wa","pdf","txt") else None)
+    if not mapped:
+        return ("❌ Format tidak dikenal.\n\n"
+                "Pilihan: /format wa | /format pdf | /format txt | /format ask")
+    session.output_format = mapped
+    session_mgr.save(session)
+    return (f"✅ Format jawaban diatur ke *{FORMAT_LABELS[mapped]}*.\n"
+            f"Semua jawaban berikutnya langsung dalam format ini.\n\n"
+            f"_Ubah lagi dengan /format ask untuk ditanya tiap kali._")
 
 
 # ── Entry point utama ────────────────────────────────────────
@@ -387,7 +463,9 @@ COMMAND_WORDS = {
     "/skills",
     "/skill",
     "/model", "/models",
+    "/format", "/formats",
     "/pdf",
+    "/txt",
 }
 
 
@@ -450,6 +528,24 @@ def handle(phone: str, name: str, body: str,
 
     if lower.startswith("/model "):
         return set_model(text[7:].strip(), session, session_mgr)
+
+    # ── /format [wa|pdf|txt|ask] ─────────────────────────────
+    if lower in ("/format", "/formats"):
+        return (
+            f"📋 *FORMAT JAWABAN*\n{LINE}\n"
+            f"Saat ini: *{FORMAT_LABELS.get(session.output_format, session.output_format)}*\n\n"
+            f"Ubah dengan:\n"
+            f"  /format wa  — 💬 WhatsApp langsung\n"
+            f"  /format pdf — 📄 PDF siap unduh\n"
+            f"  /format txt — 📝 TXT siap unduh\n"
+            f"  /format ask — ❓ tanya setiap kali"
+        )
+    if lower.startswith("/format "):
+        return set_format(text[8:].strip(), session, session_mgr)
+
+    # ── /txt — export respons terakhir ke TXT ────────────────
+    if lower == "/txt":
+        return make_txt(session, acc_home)
 
     # ── /pdf [opsional teks] ─────────────────────────────────
     if lower == "/pdf":

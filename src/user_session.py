@@ -21,8 +21,9 @@ class UserSession:
             "model": "claude-sonnet-4-5",
         }
         self.skill = None            # nama skill aktif, None = mode umum
+        self.output_format = "ask"   # ask | wa | pdf | txt — format jawaban default
         self.history: list = []      # [{"role": "user"|"assistant", "content": "..."}]
-        self.pending = None          # untuk stateful menu (belum dipakai)
+        self.pending = None          # state stateful: {"action":"choose_format","query":"..."}
         self.registered_at = datetime.now().isoformat()
         self.last_active = datetime.now().isoformat()
 
@@ -35,6 +36,7 @@ class UserSession:
             "model_key": self.model_key,
             "model_config": self.model_config,
             "skill": self.skill,
+            "output_format": self.output_format,
             "history": self.history[-40:],  # simpan 20 pasang terakhir
             "pending": self.pending,
             "registered_at": self.registered_at,
@@ -51,6 +53,7 @@ class UserSession:
             "provider": "anthropic", "model": "claude-sonnet-4-5"
         })
         s.skill = d.get("skill")
+        s.output_format = d.get("output_format", "ask")
         s.history = d.get("history", [])
         s.pending = d.get("pending")
         s.registered_at = d.get("registered_at", datetime.now().isoformat())

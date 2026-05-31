@@ -200,28 +200,45 @@ def call_ai(session, msg: str) -> str:
     except Exception as e:
         return f"Maaf, terjadi kesalahan internal: {e}"
 
-# ── Background worker ─────────────────────────────────────────
-def ai_worker(phone: str, name: str, body: str, mgr):
-    """Proses AI di background, kirim hasil via REST API."""
+# ── Background worker terpadu (format: wa | pdf | txt) ───────
+def ai_worker(phone: str, name: str, body: str, mgr, fmt: str = "wa"):
+    """
+    Proses AI di background, kirim hasil sesuai format:
+      wa  → teks langsung (dipecah jika panjang)
+      pdf → ringkasan + link PDF
+      txt → ringkasan + link TXT
+    """
     try:
         session = mgr.get(phone, name)
         model   = bot.MODELS.get(session.model_key,{}).get("label", session.model_key) \
                   if BOT_OK else session.model_key
 
-        sp = Spinner(f"AI ({model})").start()
+        sp = Spinner(f"AI [{fmt.upper()}] ({model})").start()
         reply = call_ai(session, body)
         sp.stop(f"→ {len(reply)} char")
 
         mgr.add_message(phone, "user",      body)
         mgr.add_message(phone, "assistant", reply)
+        session = mgr.get(phone)  # refresh agar last_ai_response terisi
 
-        # Jawaban sangat panjang → tawarkan PDF (hemat pesan WA)
-        if len(reply) > 6000:
-            reply += ("\n\n💡 _Jawaban panjang. Kirim /pdf untuk versi PDF rapi "
-                      "yang bisa diunduh._")
+        if fmt == "pdf" and BOT_OK:
+            print(f"  {dim('Membuat PDF...')}")
+            file_msg = bot.make_pdf(session, ACC_HOME)
+            preview  = reply[:600] + ("\n\n_..._" if len(reply) > 600 else "")
+            send_wa(phone, f"{preview}\n\n{file_msg}")
 
-        print(f"  {dim('Mengirim hasil via REST API...')}")
-        send_wa(phone, reply)
+        elif fmt == "txt" and BOT_OK:
+            print(f"  {dim('Membuat TXT...')}")
+            file_msg = bot.make_txt(session, ACC_HOME)
+            preview  = reply[:600] + ("\n\n_..._" if len(reply) > 600 else "")
+            send_wa(phone, f"{preview}\n\n{file_msg}")
+
+        else:  # wa
+            if len(reply) > 6000:
+                reply += ("\n\n💡 _Jawaban panjang. Ketik /pdf atau /txt untuk "
+                          "versi file rapi yang bisa diunduh._")
+            print(f"  {dim('Mengirim hasil via WhatsApp...')}")
+            send_wa(phone, reply)
 
     except Exception as e:
         log_err(f"ai_worker crash: {e}")
@@ -229,24 +246,6 @@ def ai_worker(phone: str, name: str, body: str, mgr):
         try:
             send_wa(phone, f"Maaf, terjadi kesalahan: {e}")
         except: pass
-
-def ai_worker_pdf(phone: str, name: str, prompt: str, mgr):
-    try:
-        session = mgr.get(phone, name)
-        model   = bot.MODELS.get(session.model_key,{}).get("label", session.model_key) \
-                  if BOT_OK else session.model_key
-        sp = Spinner(f"AI PDF ({model})").start()
-        ai_reply = call_ai(session, prompt)
-        sp.stop()
-        mgr.add_message(phone, "user",      prompt)
-        mgr.add_message(phone, "assistant", ai_reply)
-        session = mgr.get(phone)
-        pdf_msg = bot.make_pdf(session, ACC_HOME) if BOT_OK else "_PDF tidak tersedia_"
-        result  = f"{ai_reply[:2000]}\n\n{pdf_msg}" if ai_reply else pdf_msg
-        send_wa(phone, result[:3800])
-    except Exception as e:
-        log_err(f"ai_worker_pdf crash: {e}")
-        traceback.print_exc()
 
 # ── TwiML helper ─────────────────────────────────────────────
 def _twiml(text: str = "") -> Response:
@@ -290,15 +289,39 @@ def create_app():
 
         log_in(ts, name, phone, body, model, session.skill)
 
-        # ── Bot commands → langsung TwiML ──────────────────────
+        def _start_ai(query: str, fmt: str) -> str:
+            """Mulai worker AI dengan format tertentu, kembalikan teks ACK."""
+            print(f"  {dim(f'→ AI thread [{fmt.upper()}] dimulai...')}")
+            threading.Thread(target=ai_worker,
+                             args=(phone, name, query, mgr, fmt),
+                             daemon=True).start()
+            skill_txt = f"\nSkill: _{session.skill}_" if session.skill else ""
+            fmt_label = {"wa":"💬 WhatsApp","pdf":"📄 PDF","txt":"📝 TXT"}.get(fmt, fmt)
+            return (f"⏳ *Sedang memproses...*\n"
+                    f"🧠 {model}{skill_txt}\n"
+                    f"📤 Format: {fmt_label}\n\n"
+                    f"_Mohon tunggu, jawaban menyusul..._")
+
+        # ── 1. Sedang menunggu pilihan format? ─────────────────
+        if BOT_OK and session.pending and session.pending.get("action") == "choose_format":
+            choice = bot.parse_format_choice(body)
+            if choice:
+                query = session.pending.get("query", "")
+                session.pending = None
+                mgr.save(session)
+                ack = _start_ai(query, choice)
+                log_cmd(f"[FORMAT={choice}] {query[:40]}")
+                return _twiml(ack)
+            # Bukan pilihan valid → anggap query baru, lanjut ke bawah
+            session.pending = None
+            mgr.save(session)
+
+        # ── 2. Bot commands → langsung TwiML ───────────────────
         if BOT_OK:
             if body.strip().lower().startswith("/pdf "):
                 prompt = bot.extract_pdf_prompt(body)
-                threading.Thread(target=ai_worker_pdf,
-                                 args=(phone, name, prompt, mgr),
-                                 daemon=True).start()
-                ack = f"⏳ *Membuat PDF...*\nTopik: _{prompt[:60]}_\nSedang diproses..."
-                log_cmd(ack)
+                ack = _start_ai(prompt, "pdf")
+                log_cmd(f"[/pdf] {prompt[:40]}")
                 return _twiml(ack)
 
             cmd = bot.handle(phone, name, body, mgr, ACC_HOME)
@@ -306,18 +329,18 @@ def create_app():
                 log_cmd(cmd)
                 return _twiml(cmd)
 
-        # ── Query AI → balas "Memproses" dulu, AI di background ──
-        print(f"  {dim('→ Background AI thread dimulai...')}")
-        threading.Thread(target=ai_worker,
-                         args=(phone, name, body, mgr),
-                         daemon=True).start()
+        # ── 3. Query AI biasa → cek format default user ────────
+        fmt = session.output_format if BOT_OK else "wa"
 
-        skill_txt = f"\nSkill: _{session.skill}_" if session.skill else ""
-        ack = (f"⏳ *Sedang memproses...*\n"
-               f"🧠 {model}{skill_txt}\n\n"
-               f"_Mohon tunggu, jawaban menyusul dalam beberapa detik..._")
-        log_cmd("[ACK] Memproses...")
-        # Pesan ini muncul cepat (<1s), jawaban lengkap menyusul via REST API
+        if fmt == "ask" and BOT_OK:
+            # Simpan query, tanya format dulu
+            session.pending = {"action": "choose_format", "query": body}
+            mgr.save(session)
+            log_cmd("[ASK FORMAT] menampilkan menu pilihan")
+            return _twiml(bot.fmt_format_menu(body))
+
+        # Format sudah ditentukan → langsung proses
+        ack = _start_ai(body, fmt if fmt in ("wa","pdf","txt") else "wa")
         return _twiml(ack)
 
     @app.route("/files/<path:fn>", methods=["GET"])

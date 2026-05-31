@@ -43,6 +43,18 @@ function Write-Header {
     Write-Host ""
 }
 
+# Error handler global
+$ErrorActionPreference = "Stop"
+$PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
+
+trap {
+    Write-Host ""
+    Write-Host "  [ERROR] $_" -ForegroundColor $C_ERR
+    Write-Host "  Stack trace:" -ForegroundColor $C_ERR
+    Write-Host $_.ScriptStackTrace -ForegroundColor $C_DIM
+    exit 1
+}
+
 function Write-Step {
     param([int]$Num, [string]$Total, [string]$Label, [string]$Status = "...")
     $icon = switch ($Status) {

@@ -1,85 +1,101 @@
 @echo off
 REM ============================================================
-REM  ARUNIKA COMMAND CENTRE - START WEBHOOK SERVER
+REM  ARUNIKA COMMAND CENTRE - WEBHOOK SERVER LAUNCHER
 REM  PT. Arunika Teknologi Global
 REM
-REM  Prasyarat: Python portable sudah ada di .cache\python\
-REM            (auto-installed oleh launch.bat sebelumnya)
+REM  Jalankan launch.bat SEKALI DULU untuk setup Python.
+REM  Setelah itu, double-klik file ini untuk jalankan
+REM  WhatsApp Webhook Server langsung.
 REM ============================================================
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 set "ACC_HOME=%~dp0"
+set "PYVER=3.12.7"
 set "PYDIR=%ACC_HOME%.cache\python"
 set "PYEXE=%PYDIR%\python.exe"
+set "PIPCACHE=%ACC_HOME%.cache\pip"
+set "PYTHONUSERBASE=%ACC_HOME%.cache\pyuser"
 
-cls
-echo.
-echo  ╔══════════════════════════════════════════════════╗
-echo  ║   ARUNIKA COMMAND CENTRE                         ║
-echo  ║   WhatsApp Webhook Server                        ║
-echo  ║   PT. Arunika Teknologi Global                   ║
-echo  ╚══════════════════════════════════════════════════╝
+set "PIP_CACHE_DIR=%PIPCACHE%"
+set "PYTHONDONTWRITEBYTECODE=1"
+set "PYTHONPATH=%ACC_HOME%src;%PYTHONPATH%"
+
+echo ============================================
+echo   ARUNIKA COMMAND CENTRE
+echo   WhatsApp Webhook Server
+echo   Drive: %~d0
+echo ============================================
 echo.
 
-REM ─── Cek Python ───────────────────────────────────────
-if not exist "%PYEXE%" (
-    echo  [X] Python portable tidak ditemukan!
-    echo      Lokasi: %PYDIR%
-    echo.
-    echo  Solusi:
-    echo    - Jalankan launch.bat dulu (akan install Python)
-    echo    - Atau download Python dari python.org
-    echo.
-    pause
-    exit /b 1
+REM ---------- 1. Cek Python portable ----------
+if exist "%PYEXE%" (
+    "%PYEXE%" -c "import sys" >nul 2>nul && (
+        echo [OK] Python portable ditemukan.
+        goto :PYREADY
+    )
 )
 
-echo  [OK] Python ditemukan
+REM Cek Python system
+where python >nul 2>nul
+if not errorlevel 1 (
+    set "PYEXE=python"
+    echo [OK] Python system ditemukan.
+    goto :PYREADY
+)
+
+echo [X] Python tidak ditemukan!
+echo.
+echo  Solusi: Jalankan launch.bat dulu untuk install Python,
+echo  lalu jalankan START.bat kembali.
+echo.
+pause
+exit /b 1
+
+:PYREADY
+echo [OK] Menggunakan Python:
 "%PYEXE%" --version
 echo.
 
-REM ─── Cek dependensi ───────────────────────────────────
-echo  Memeriksa dependensi...
-"%PYEXE%" -c "import flask, fpdf, anthropic, twilio" >nul 2>&1
+REM ---------- 2. Cek & pasang dependensi ----------
+echo [*] Memeriksa dependensi...
+"%PYEXE%" -c "import flask, fpdf, twilio" >nul 2>&1
 if errorlevel 1 (
-    echo  [!] Ada paket yang kurang. Memasang...
-    "%PYEXE%" -m pip install -q flask fpdf2 --no-warn-script-location
+    echo [!] Paket belum lengkap, memasang...
+    "%PYEXE%" -m pip install --no-warn-script-location --disable-pip-version-check -q flask fpdf2 twilio
     if errorlevel 1 (
-        echo  [X] Gagal install dependensi.
-        echo      Coba jalankan manual di terminal:
-        echo        python -m pip install flask fpdf2
-        echo.
+        echo [X] Gagal install paket. Cek koneksi internet.
         pause
         exit /b 1
     )
+    echo [OK] Dependensi terpasang.
+) else (
+    echo [OK] Semua dependensi tersedia.
 )
-echo  [OK] Semua dependensi tersedia
 echo.
 
-REM ─── Persiapan folder ─────────────────────────────────
+REM ---------- 3. Siapkan folder output ----------
 if not exist "%ACC_HOME%data\output" mkdir "%ACC_HOME%data\output"
 
-REM ─── Jalankan webhook server ──────────────────────────
-echo  ╔══════════════════════════════════════════════════╗
-echo  ║  STARTING WEBHOOK SERVER (port 5000)             ║
-echo  ╚══════════════════════════════════════════════════╝
+REM ---------- 4. Jalankan Webhook Server ----------
+echo ============================================
+echo   SERVER SIAP - PORT 5000
+echo ============================================
 echo.
-echo  Langkah selanjutnya:
-echo    1. Buka terminal BARU
-echo    2. Jalankan: ngrok http 5000
-echo    3. Copy URL ngrok (https://xxxx.ngrok.io)
-echo    4. Tempel ke Twilio Console ^> Sandbox settings
-echo    5. Kirim pesan WhatsApp ke nomor sandbox Twilio
+echo   Langkah berikutnya:
+echo   [1] Buka terminal BARU
+echo   [2] Jalankan: ngrok http 5000
+echo   [3] Copy URL: https://xxxx.ngrok.io
+echo   [4] Twilio Console ^> Sandbox settings
+echo       Isi Webhook URL:
+echo       https://xxxx.ngrok.io/webhook/whatsapp
+echo   [5] Kirim pesan WhatsApp ke sandbox Twilio
 echo.
-echo  Server berjalan... (Ctrl+C untuk berhenti)
-echo  ─────────────────────────────────────────────────────
+echo   Tekan Ctrl+C untuk menghentikan server.
+echo ============================================
 echo.
 
-set "PYTHONPATH=%ACC_HOME%src;%PYTHONPATH%"
 "%PYEXE%" "%ACC_HOME%src\webhook_server.py"
 
 echo.
-echo  ─────────────────────────────────────────────────────
-echo  [OK] Server berhenti.
-echo.
+echo [OK] Server berhenti.
 pause

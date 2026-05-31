@@ -261,7 +261,7 @@ def create_app():
 
         log_incoming(ts, name, phone, body, model_label, session.skill)
 
-        # ── Bot commands (langsung, tanpa AI) ─────────────────
+        # ── Bot commands (langsung, tanpa AI) ──────────────────
         if BOT_OK:
             is_pdf_prompt = body.strip().lower().startswith("/pdf ")
             if is_pdf_prompt:
@@ -280,24 +280,28 @@ def create_app():
                 log_cmd(cmd_reply)
                 return _twiml(cmd_reply)
 
-        # ── Chat biasa: balas "Memproses" dulu, AI di background ─
-        session = mgr.get(phone, name)
-        model_label = bot.MODELS.get(session.model_key, {}).get("label", session.model_key) \
-                      if BOT_OK else session.model_key
-        skill_txt = f" | skill: _{session.skill}_" if session.skill else ""
+        # ── Chat biasa: panggil AI secara SINKRON ──────────────
+        # Twilio timeout = 15 detik. Claude Haiku biasanya < 10 detik.
+        sp = Spinner(f"AI ({model_label})").start()
+        t0 = time.time()
+        try:
+            ai_reply = call_ai(session, body)
+        except Exception as e:
+            ai_reply = f"Maaf, terjadi kesalahan: {e}"
+        elapsed = time.time() - t0
+        sp.stop(f"→ {len(ai_reply)} char")
 
-        ack = (f"⏳ *Memproses permintaan Anda...*\n"
-               f"Model: {model_label}{skill_txt}\n\n"
-               f"_Jawaban akan dikirim dalam beberapa detik._")
+        # Simpan riwayat
+        mgr.add_message(phone, "user", body)
+        mgr.add_message(phone, "assistant", ai_reply)
 
-        threading.Thread(
-            target=ai_worker,
-            args=(phone, name, body, mgr),
-            daemon=True
-        ).start()
+        # Potong jika terlalu panjang
+        MAX = 3800
+        if len(ai_reply) > MAX:
+            ai_reply = ai_reply[:MAX] + "\n\n_[Dipotong. Kirim /pdf untuk versi lengkap]_"
 
-        log_cmd(f"[ACK] {ack[:60]}")
-        return _twiml(ack)
+        log_sent(len(ai_reply))
+        return _twiml(ai_reply)
 
     @app.route("/files/<path:filename>", methods=["GET"])
     def serve_file(filename):

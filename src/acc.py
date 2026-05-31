@@ -16,7 +16,7 @@ import os
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 # ---------- Lokasi ----------
 ACC_HOME = Path(os.environ.get("ACC_HOME", Path(__file__).resolve().parent.parent))
@@ -59,9 +59,31 @@ def read_md(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def get_jakarta_datetime() -> str:
+    """Kembalikan tanggal & waktu saat ini dalam zona waktu Jakarta (WIB, UTC+7)."""
+    WIB = timezone(timedelta(hours=7))
+    now = datetime.now(WIB)
+    hari_names  = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+    bulan_names = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                   "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    hari  = hari_names[now.weekday()]
+    bulan = bulan_names[now.month - 1]
+    return (
+        f"Hari/Tanggal : {hari}, {now.day} {bulan} {now.year}\n"
+        f"Waktu        : {now.strftime('%H:%M')} WIB\n"
+        f"Zona Waktu   : WIB (Jakarta, Indonesia, UTC+7)"
+    )
+
+
 def build_system_prompt(skill: str = None) -> str:
-    """Gabungkan SOUL + DESIGN + PROFIL + (skill terpilih) menjadi system prompt."""
-    parts = [read_md(AGENT_DIR / "SOUL.md"), read_md(AGENT_DIR / "DESIGN.md")]
+    """Gabungkan konteks waktu + SOUL + DESIGN + PROFIL + skill menjadi system prompt."""
+    # Konteks waktu Jakarta selalu disertakan di awal
+    time_ctx = (
+        "## Konteks Waktu\n"
+        + get_jakarta_datetime()
+    )
+    parts = [time_ctx, read_md(AGENT_DIR / "SOUL.md"), read_md(AGENT_DIR / "DESIGN.md")]
+
     # Sisipkan profil lembaga (jika sudah di-setup)
     try:
         from setup_profile import build_profile_context
@@ -70,10 +92,12 @@ def build_system_prompt(skill: str = None) -> str:
             parts.append(prof)
     except Exception:
         pass
+
     if skill:
         sp = SKILLS_DIR / f"{skill}.md"
         if sp.exists():
             parts.append(read_md(sp))
+
     return "\n\n---\n\n".join(p for p in parts if p)
 
 

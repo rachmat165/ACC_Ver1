@@ -106,7 +106,8 @@ def call_model(system_prompt: str, user_message: str, cfg: dict) -> str:
 
 
 def call_model_multi_turn(system_prompt: str, user_message: str,
-                          history: list, cfg: dict) -> str:
+                          history: list, cfg: dict,
+                          model_override: dict | None = None) -> str:
     """
     Panggil model AI dengan riwayat percakapan (multi-turn).
 
@@ -115,6 +116,8 @@ def call_model_multi_turn(system_prompt: str, user_message: str,
         user_message: Pesan terbaru dari pengguna
         history: List {"role": "user"|"assistant", "content": str} — riwayat sebelumnya
         cfg: config.yaml dict
+        model_override: override per-session {"provider": "...", "model": "..."}
+                        Jika diisi, gunakan ini bukan config.yaml.
 
     Provider yang didukung (set di config.yaml -> provider.active):
         anthropic  — Claude via Anthropic API (ANTHROPIC_API_KEY)
@@ -122,9 +125,15 @@ def call_model_multi_turn(system_prompt: str, user_message: str,
         openrouter — 100+ model via OpenRouter (OPENROUTER_API_KEY)
         lmstudio   — Model lokal via LM Studio (LM_STUDIO_BASE_URL)
     """
-    provider = (cfg.get("provider", {}) or {}).get("active", "anthropic")
-    temperature = (cfg.get("provider", {}) or {}).get("temperature", 0.4)
-    max_tokens = (cfg.get("provider", {}) or {}).get("max_tokens", 4096)
+    cfg_prov = cfg.get("provider", {}) or {}
+    temperature = cfg_prov.get("temperature", 0.4)
+    max_tokens  = cfg_prov.get("max_tokens", 4096)
+
+    # model_override dari sesi user menang atas config.yaml
+    if model_override and model_override.get("provider"):
+        provider = model_override["provider"]
+    else:
+        provider = cfg_prov.get("active", "anthropic")
 
     # Gabungkan history + pesan baru
     messages = list(history) + [{"role": "user", "content": user_message}]
@@ -134,7 +143,9 @@ def call_model_multi_turn(system_prompt: str, user_message: str,
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-            model = os.environ.get("ACC_PRIMARY_MODEL", "claude-sonnet-4-5")
+            # model_override menang; fallback ke env/config
+            model = (model_override or {}).get("model") \
+                    or os.environ.get("ACC_PRIMARY_MODEL", "claude-sonnet-4-5")
             kwargs = {
                 "model": model,
                 "max_tokens": max_tokens,
@@ -151,7 +162,8 @@ def call_model_multi_turn(system_prompt: str, user_message: str,
     # ── OpenAI (GPT) ────────────────────────────────────────────────────
     if provider == "openai" and os.environ.get("OPENAI_API_KEY"):
         try:
-            model = os.environ.get("ACC_FALLBACK_MODEL", "gpt-4o")
+            model = (model_override or {}).get("model") \
+                    or os.environ.get("ACC_FALLBACK_MODEL", "gpt-4o")
             return _openai_compat_call(
                 base_url="https://api.openai.com/v1",
                 api_key=os.environ["OPENAI_API_KEY"],
@@ -167,10 +179,9 @@ def call_model_multi_turn(system_prompt: str, user_message: str,
     # ── OpenRouter (100+ model via 1 API key) ───────────────────────────
     if provider == "openrouter" and os.environ.get("OPENROUTER_API_KEY"):
         try:
-            model = os.environ.get(
-                "OPENROUTER_MODEL",
-                (cfg.get("provider", {}) or {}).get("openrouter_model", "anthropic/claude-sonnet-4-5"),
-            )
+            model = (model_override or {}).get("model") \
+                    or os.environ.get("OPENROUTER_MODEL",
+                       cfg_prov.get("openrouter_model", "anthropic/claude-sonnet-4-5"))
             base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
             return _openai_compat_call(
                 base_url=base_url,
@@ -187,14 +198,11 @@ def call_model_multi_turn(system_prompt: str, user_message: str,
     # ── LM Studio (model lokal di komputer) ─────────────────────────────
     if provider == "lmstudio":
         try:
-            base_url = os.environ.get(
-                "LM_STUDIO_BASE_URL",
-                (cfg.get("provider", {}) or {}).get("lmstudio_base_url", "http://localhost:1234/v1"),
-            )
-            model = os.environ.get(
-                "LM_STUDIO_MODEL",
-                (cfg.get("provider", {}) or {}).get("lmstudio_model", "local-model"),
-            )
+            base_url = os.environ.get("LM_STUDIO_BASE_URL",
+                        cfg_prov.get("lmstudio_base_url", "http://localhost:1234/v1"))
+            model = (model_override or {}).get("model") \
+                    or os.environ.get("LM_STUDIO_MODEL",
+                       cfg_prov.get("lmstudio_model", "local-model"))
             api_key = os.environ.get("LM_STUDIO_API_KEY", "lm-studio")
             return _openai_compat_call(
                 base_url=base_url,

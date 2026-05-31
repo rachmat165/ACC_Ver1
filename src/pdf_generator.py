@@ -71,22 +71,74 @@ def _strip_markdown(text: str) -> list[tuple[str, str]]:
     return result
 
 
+def _render_table(pdf, headers: list[str], rows: list[list[str]]):
+    """Render tabel asli di PDF (kolom rapi). Fallback ke teks bila gagal."""
+    headers = [_pdf_safe(re.sub(r"\*\*?", "", h)) for h in headers]
+    rows = [[_pdf_safe(re.sub(r"\*\*?", "", c)) for c in r] for r in rows]
+    ncol = max([len(headers)] + [len(r) for r in rows]) if (headers or rows) else 0
+    if ncol == 0:
+        return
+
+    # Samakan jumlah kolom tiap baris
+    headers = (headers + [""] * ncol)[:ncol]
+    rows = [(r + [""] * ncol)[:ncol] for r in rows]
+
+    try:
+        pdf.ln(2)
+        with pdf.table(
+            first_row_as_headings=True,
+            headings_style=__import__("fpdf").fonts.FontFace(
+                emphasis="BOLD", color=(255, 255, 255), fill_color=(40, 100, 180)
+            ),
+            cell_fill_color=(238, 242, 250),
+            cell_fill_mode="ROWS",
+            line_height=6,
+            text_align="LEFT",
+            width=pdf.epw,
+        ) as table:
+            r = table.row()
+            for h in headers:
+                r.cell(h)
+            for data_row in rows:
+                r = table.row()
+                for c in data_row:
+                    r.cell(c)
+        pdf.ln(2)
+    except Exception:
+        # Fallback: render sebagai teks label:value
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(20, 20, 20)
+        for data_row in rows:
+            label = data_row[0] if data_row else ""
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.multi_cell(0, 6, label)
+            pdf.set_font("Helvetica", "", 10)
+            for i in range(1, len(data_row)):
+                col = headers[i] if i < len(headers) else ""
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 6, f"   {col}: {data_row[i]}")
+        pdf.ln(2)
+
+
 def generate_pdf_from_text(
     content: str,
     judul: str = None,
     output_dir: Path = None,
     filename: str = None,
     company_name: str = "PT. Arunika Teknologi Global",
+    doc_type: str = None,
 ) -> str:
     """
-    Generate PDF dari teks/markdown.
+    Generate PDF dari teks/markdown dengan tabel asli & layout per jenis dokumen.
 
     Args:
-        content: Isi dokumen (mendukung markdown sederhana)
+        content: Isi dokumen (markdown: #, ##, **, -, tabel |...|)
         judul: Judul dokumen (auto-detect dari konten jika kosong)
         output_dir: Folder output (default: cwd/data/output)
         filename: Nama file output (auto-generate jika kosong)
-        company_name: Nama perusahaan untuk header
+        company_name: Nama perusahaan untuk kop
+        doc_type: 'surat'|'proposal'|'presentasi'|'umum' (auto-deteksi jika None)
 
     Returns:
         Path absolut file PDF yang dibuat
@@ -97,6 +149,14 @@ def generate_pdf_from_text(
         raise ImportError(
             "fpdf2 belum terpasang. Jalankan: pip install fpdf2"
         )
+
+    # Deteksi jenis dokumen untuk penyesuaian layout
+    if doc_type is None:
+        try:
+            from doc_utils import detect_doc_type
+            doc_type = detect_doc_type(content)
+        except Exception:
+            doc_type = "umum"
 
     # Setup output dir
     if output_dir is None:
@@ -158,43 +218,64 @@ def generate_pdf_from_text(
     pdf.multi_cell(0, 8, judul, align="C")
     pdf.ln(6)
 
-    # Konten
-    parsed = _strip_markdown(content)
-    for style, text in parsed:
-        text = _pdf_safe(text)  # pengaman lapis kedua
-        pdf.set_x(pdf.l_margin)  # selalu mulai dari margin kiri (hindari drift X)
+    # Konten — proses baris demi baris, deteksi blok tabel
+    from doc_utils import parse_md_table
+    raw_lines = content.split("\n")
+    i = 0
+    n = len(raw_lines)
+
+    def write_line(style, text):
+        text = _pdf_safe(text)
+        pdf.set_x(pdf.l_margin)
         if style == "empty":
             pdf.ln(3)
         elif style == "h1":
-            pdf.set_font("Helvetica", "B", 13)
-            pdf.set_text_color(30, 80, 160)
-            pdf.ln(2)
-            pdf.multi_cell(0, 7, text)
-            pdf.ln(1)
+            pdf.set_font("Helvetica", "B", 13); pdf.set_text_color(30, 80, 160)
+            pdf.ln(2); pdf.multi_cell(0, 7, text); pdf.ln(1)
         elif style == "h2":
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.set_text_color(40, 100, 180)
-            pdf.ln(1)
-            pdf.multi_cell(0, 7, text)
-            pdf.ln(1)
+            pdf.set_font("Helvetica", "B", 12); pdf.set_text_color(40, 100, 180)
+            pdf.ln(1); pdf.multi_cell(0, 7, text); pdf.ln(1)
         elif style == "h3":
-            pdf.set_font("Helvetica", "B", 11)
-            pdf.set_text_color(60, 60, 60)
+            pdf.set_font("Helvetica", "B", 11); pdf.set_text_color(60, 60, 60)
             pdf.multi_cell(0, 6, text)
         elif style == "bold":
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.set_text_color(20, 20, 20)
+            pdf.set_font("Helvetica", "B", 10); pdf.set_text_color(20, 20, 20)
             pdf.multi_cell(0, 6, text)
         elif style == "bullet":
-            pdf.set_font("Helvetica", "", 10)
-            pdf.set_text_color(20, 20, 20)
+            pdf.set_font("Helvetica", "", 10); pdf.set_text_color(20, 20, 20)
             pdf.multi_cell(0, 6, f"   - {text}")
-        else:  # normal
-            pdf.set_font("Helvetica", "", 10)
-            pdf.set_text_color(20, 20, 20)
+        elif style == "hr":
+            pdf.ln(1); pdf.set_draw_color(200, 200, 200); pdf.set_line_width(0.2)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+            pdf.ln(3)
+        else:
+            pdf.set_font("Helvetica", "", 10); pdf.set_text_color(20, 20, 20)
             pdf.multi_cell(0, 6, text)
 
-    # Footer
+    while i < n:
+        line = raw_lines[i]
+        stripped = line.strip()
+
+        # Blok tabel: kumpulkan baris berurutan yang mengandung |
+        if stripped.startswith("|") and stripped.count("|") >= 2:
+            block = []
+            while i < n and raw_lines[i].strip().startswith("|"):
+                block.append(raw_lines[i]); i += 1
+            headers, rows = parse_md_table(block)
+            if headers or rows:
+                _render_table(pdf, headers, rows)
+            continue
+
+        # Horizontal rule (--- *** ___)
+        if re.match(r"^\s*([-*_])\1{2,}\s*$", stripped):
+            write_line("hr", ""); i += 1; continue
+
+        # Markdown biasa → pakai _strip_markdown utk 1 baris
+        for style, text in _strip_markdown(line):
+            write_line(style, text)
+        i += 1
+
+    # Footer dengan nomor halaman
     pdf.set_y(-15)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(150, 150, 150)

@@ -12,6 +12,7 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # agar bisa import doc_utils
 ACC_HOME = Path(os.environ.get("ACC_HOME", Path(__file__).resolve().parent.parent))
 PORT     = int(os.environ.get("ACC_WEBHOOK_PORT", 5000))
 CF_DIR   = ACC_HOME / ".cache" / "cloudflared"
@@ -119,7 +120,15 @@ def main():
         input("  Tekan Enter untuk keluar...")
         sys.exit(1)
 
-    # 4. Tampilkan & salin ke clipboard
+    # 4. Simpan URL publik agar webhook bisa membuat link download PDF/TXT
+    try:
+        from doc_utils import save_public_base_url
+        save_public_base_url(ACC_HOME, url)
+        print(f"  [OK] URL publik disimpan (link download PDF/TXT aktif)")
+    except Exception as e:
+        print(f"  [!] Gagal simpan URL publik: {e}")
+
+    # Tampilkan & salin ke clipboard
     webhook_url = f"{url}/webhook/whatsapp"
     copy_clipboard(webhook_url)
 
@@ -156,6 +165,12 @@ def main():
     except KeyboardInterrupt:
         proc.terminate()
         print("\n  Tunnel dihentikan.")
+    finally:
+        # Hapus URL basi agar link download tidak menunjuk tunnel mati
+        try:
+            (ACC_HOME / "data" / "tunnel_url.txt").unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

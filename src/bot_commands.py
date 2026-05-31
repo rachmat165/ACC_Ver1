@@ -436,17 +436,22 @@ def set_model(model_key: str, session, session_mgr) -> str:
     )
 
 
-def _file_link(fname: str, kind: str) -> str:
+def _file_link(fname: str, kind: str, acc_home: Path = None) -> str:
     """Buat pesan link download untuk file di data/output."""
-    webhook_url = os.environ.get("WA_WEBHOOK_URL", "").rstrip("/")
-    if webhook_url:
-        url = f"{webhook_url}/files/{fname}"
-        return f"📄 *{kind} Siap Diunduh!*\n\n🔗 {url}\n\n_File: {fname}_"
+    base = None
+    try:
+        from doc_utils import get_public_base_url
+        base = get_public_base_url(acc_home or Path.cwd())
+    except Exception:
+        base = os.environ.get("WA_WEBHOOK_URL", "").strip().rstrip("/") or None
+    if base:
+        url = f"{base}/files/{fname}"
+        return f"📄 *{kind} Siap Diunduh!*\n\n🔗 {url}\n\n_Klik link untuk membuka {kind}._"
     return (
         f"📄 *{kind} Tersimpan*\n\n"
         f"File: {fname}\n"
         f"Lokasi: data/output/{fname}\n\n"
-        f"_Isi WA_WEBHOOK_URL di .env agar bisa diunduh via WhatsApp._"
+        f"_Tunnel belum aktif — jalankan START.bat agar link download muncul._"
     )
 
 
@@ -466,7 +471,7 @@ def make_pdf(session, acc_home: Path) -> str:
         )
     try:
         path = generate_pdf_from_text(last, output_dir=acc_home / "data" / "output")
-        return _file_link(Path(path).name, "PDF")
+        return _file_link(Path(path).name, "PDF", acc_home)
     except Exception as e:
         return f"❌ Gagal buat PDF: {e}"
 
@@ -483,7 +488,7 @@ def make_txt(session, acc_home: Path) -> str:
         return "❌ Belum ada respons untuk dijadikan TXT. Kirim pertanyaan dulu."
     try:
         path = generate_txt_from_text(last, output_dir=acc_home / "data" / "output")
-        return _file_link(Path(path).name, "TXT")
+        return _file_link(Path(path).name, "TXT", acc_home)
     except Exception as e:
         return f"❌ Gagal buat TXT: {e}"
 

@@ -6,9 +6,21 @@ company:
   website: "arunika2045.com"
 
 provider:
-  active: anthropic        # anthropic | openai | openrouter | gemini | mcp
+  # Pilih provider aktif:
+  #   anthropic  -> Claude via Anthropic API (paling disarankan)
+  #   openai     -> GPT via OpenAI API
+  #   openrouter -> 100+ model via OpenRouter (1 key untuk semua)
+  #   lmstudio   -> Model lokal di komputer (gratis, butuh LM Studio)
+  active: anthropic
   temperature: 0.4
   max_tokens: 4096
+
+  # OpenRouter - model yang digunakan (bisa dioverride via env OPENROUTER_MODEL)
+  openrouter_model: anthropic/claude-sonnet-4-5
+
+  # LM Studio - konfigurasi server lokal
+  lmstudio_base_url: http://localhost:1234/v1
+  lmstudio_model: local-model
 
 # Perutean tugas -> tingkat model (hemat biaya)
 routing:
@@ -24,6 +36,13 @@ agent:
   heartbeat_minutes: 30
   language: id
   require_human_approval: true   # skill baru & dokumen resmi minta persetujuan
+
+# WhatsApp Webhook
+whatsapp:
+  # Maksimal riwayat pesan per sesi (jumlah pasang user+assistant)
+  max_session_history: 10
+  # Panjang maksimal reply sebelum dipotong (karakter)
+  max_reply_length: 3800
 
 multitenant:
   default_tenant: contoh-tenant

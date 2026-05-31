@@ -14,3 +14,9 @@ pytest>=8.0.0
 # Util
 requests>=2.31.0
 twilio>=9.0.0
+
+# WhatsApp Webhook Server
+flask>=3.0.0
+
+# PDF Generator (untuk kirim hasil via WhatsApp)
+fpdf2>=2.7.0

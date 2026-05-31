@@ -84,22 +84,62 @@ def list_skills():
 
 
 # ---------- Pemanggilan Model ----------
+def _openai_compat_call(base_url: str, api_key: str, model: str,
+                        system_prompt: str, messages: list, temperature: float,
+                        max_tokens: int) -> str:
+    """Panggil API yang kompatibel OpenAI (OpenAI, OpenRouter, LM Studio)."""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    full_messages = [{"role": "system", "content": system_prompt}] + list(messages)
+    resp = client.chat.completions.create(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        messages=full_messages,
+    )
+    return resp.choices[0].message.content
+
+
 def call_model(system_prompt: str, user_message: str, cfg: dict) -> str:
+    """Panggil model AI (single turn). Gunakan call_model_multi_turn untuk chat berkelanjutan."""
+    return call_model_multi_turn(system_prompt, user_message, [], cfg)
+
+
+def call_model_multi_turn(system_prompt: str, user_message: str,
+                          history: list, cfg: dict) -> str:
+    """
+    Panggil model AI dengan riwayat percakapan (multi-turn).
+
+    Args:
+        system_prompt: System prompt / instruksi AI
+        user_message: Pesan terbaru dari pengguna
+        history: List {"role": "user"|"assistant", "content": str} — riwayat sebelumnya
+        cfg: config.yaml dict
+
+    Provider yang didukung (set di config.yaml -> provider.active):
+        anthropic  — Claude via Anthropic API (ANTHROPIC_API_KEY)
+        openai     — GPT via OpenAI API (OPENAI_API_KEY)
+        openrouter — 100+ model via OpenRouter (OPENROUTER_API_KEY)
+        lmstudio   — Model lokal via LM Studio (LM_STUDIO_BASE_URL)
+    """
     provider = (cfg.get("provider", {}) or {}).get("active", "anthropic")
     temperature = (cfg.get("provider", {}) or {}).get("temperature", 0.4)
     max_tokens = (cfg.get("provider", {}) or {}).get("max_tokens", 4096)
 
+    # Gabungkan history + pesan baru
+    messages = list(history) + [{"role": "user", "content": user_message}]
+
+    # ── Anthropic (Claude) ──────────────────────────────────────────────
     if provider == "anthropic" and os.environ.get("ANTHROPIC_API_KEY"):
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
             model = os.environ.get("ACC_PRIMARY_MODEL", "claude-sonnet-4-5")
-            # Opus 4.x sudah deprecate parameter temperature -> jangan kirim
             kwargs = {
                 "model": model,
                 "max_tokens": max_tokens,
                 "system": system_prompt,
-                "messages": [{"role": "user", "content": user_message}],
+                "messages": messages,
             }
             if "opus-4" not in model:
                 kwargs["temperature"] = temperature
@@ -108,25 +148,68 @@ def call_model(system_prompt: str, user_message: str, cfg: dict) -> str:
         except Exception as e:
             return f"[Gagal memanggil Anthropic: {e}]"
 
+    # ── OpenAI (GPT) ────────────────────────────────────────────────────
     if provider == "openai" and os.environ.get("OPENAI_API_KEY"):
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
             model = os.environ.get("ACC_FALLBACK_MODEL", "gpt-4o")
-            resp = client.chat.completions.create(
-                model=model, temperature=temperature, max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
+            return _openai_compat_call(
+                base_url="https://api.openai.com/v1",
+                api_key=os.environ["OPENAI_API_KEY"],
+                model=model,
+                system_prompt=system_prompt,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
-            return resp.choices[0].message.content
         except Exception as e:
             return f"[Gagal memanggil OpenAI: {e}]"
 
-    return ("[Belum ada API key aktif]. Isi data/.env (mis. ANTHROPIC_API_KEY) "
-            "dan set provider.active di data/config.yaml. "
-            "Mode MCP dapat dikonfigurasi di data/mcp.json.")
+    # ── OpenRouter (100+ model via 1 API key) ───────────────────────────
+    if provider == "openrouter" and os.environ.get("OPENROUTER_API_KEY"):
+        try:
+            model = os.environ.get(
+                "OPENROUTER_MODEL",
+                (cfg.get("provider", {}) or {}).get("openrouter_model", "anthropic/claude-sonnet-4-5"),
+            )
+            base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+            return _openai_compat_call(
+                base_url=base_url,
+                api_key=os.environ["OPENROUTER_API_KEY"],
+                model=model,
+                system_prompt=system_prompt,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            return f"[Gagal memanggil OpenRouter: {e}]"
+
+    # ── LM Studio (model lokal di komputer) ─────────────────────────────
+    if provider == "lmstudio":
+        try:
+            base_url = os.environ.get(
+                "LM_STUDIO_BASE_URL",
+                (cfg.get("provider", {}) or {}).get("lmstudio_base_url", "http://localhost:1234/v1"),
+            )
+            model = os.environ.get(
+                "LM_STUDIO_MODEL",
+                (cfg.get("provider", {}) or {}).get("lmstudio_model", "local-model"),
+            )
+            api_key = os.environ.get("LM_STUDIO_API_KEY", "lm-studio")
+            return _openai_compat_call(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                system_prompt=system_prompt,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            return f"[Gagal memanggil LM Studio: {e}]"
+
+    return (f"[Provider '{provider}' tidak aktif atau API key kosong]. "
+            "Periksa data/.env dan provider.active di data/config.yaml.")
 
 
 def save_session(role: str, text: str):
@@ -147,7 +230,8 @@ def cmd_doctor():
     print(f"YAML tersedia : {bool(yaml)}")
     print(f"dotenv        : {bool(load_dotenv)}")
     print(f"Provider aktif: {(cfg.get('provider', {}) or {}).get('active', '-')}")
-    keys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY"]
+    keys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+            "LM_STUDIO_BASE_URL", "LM_STUDIO_MODEL", "GEMINI_API_KEY"]
     for k in keys:
         print(f"  {k:22}: {'terisi' if os.environ.get(k) else 'kosong'}")
     print(f"Skill tersedia: {', '.join(list_skills()) or '(tidak ada)'}")

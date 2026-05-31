@@ -15,6 +15,33 @@ from pathlib import Path
 from datetime import datetime
 
 
+# Peta karakter Unicode -> latin-1 (font PDF standar hanya dukung latin-1)
+_UNICODE_MAP = {
+    "—": "-", "–": "-", "―": "-", "−": "-",
+    "“": '"', "”": '"', "„": '"', "‟": '"',
+    "‘": "'", "’": "'", "‚": "'", "‛": "'",
+    "…": "...", "•": "-", "·": "-", "‣": "-", "◦": "-",
+    "→": "->", "←": "<-", "⇒": "=>", "⇐": "<=", "↔": "<->",
+    "×": "x", "÷": "/", "±": "+/-",
+    "≥": ">=", "≤": "<=", "≠": "!=", "≈": "~",
+    "°": " derajat", "®": "(R)", "©": "(C)", "™": "(TM)",
+    " ": " ", "​": "", " ": " ", "﻿": "",
+    "‪": "", "‬": "", "★": "*", "☆": "*", "✓": "v", "✔": "v",
+    "✗": "x", "✘": "x", "►": ">", "▶": ">", "●": "-", "○": "-",
+}
+
+
+def _pdf_safe(text: str) -> str:
+    """Ubah karakter Unicode jadi latin-1 yang didukung font PDF.
+    Emoji & simbol tak dikenal dibuang agar tidak crash."""
+    if not text:
+        return text
+    for uni, ascii_eq in _UNICODE_MAP.items():
+        text = text.replace(uni, ascii_eq)
+    # Buang sisa karakter di luar latin-1 (mis. emoji)
+    return text.encode("latin-1", "ignore").decode("latin-1")
+
+
 def _strip_markdown(text: str) -> list[tuple[str, str]]:
     """
     Parse markdown sederhana, kembalikan list (style, text):
@@ -91,6 +118,11 @@ def generate_pdf_from_text(
         else:
             judul = "Dokumen Arunika"
 
+    # Sanitasi semua teks agar aman untuk font PDF latin-1
+    content      = _pdf_safe(content)
+    judul        = _pdf_safe(judul)
+    company_name = _pdf_safe(company_name)
+
     # Nama file
     if not filename:
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -129,6 +161,8 @@ def generate_pdf_from_text(
     # Konten
     parsed = _strip_markdown(content)
     for style, text in parsed:
+        text = _pdf_safe(text)  # pengaman lapis kedua
+        pdf.set_x(pdf.l_margin)  # selalu mulai dari margin kiri (hindari drift X)
         if style == "empty":
             pdf.ln(3)
         elif style == "h1":
@@ -154,8 +188,7 @@ def generate_pdf_from_text(
         elif style == "bullet":
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(20, 20, 20)
-            pdf.cell(6)  # indent
-            pdf.multi_cell(0, 6, f"• {text}")
+            pdf.multi_cell(0, 6, f"   - {text}")
         else:  # normal
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(20, 20, 20)

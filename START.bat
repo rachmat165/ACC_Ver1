@@ -42,8 +42,18 @@ if not exist "%ACC_HOME%data\output"   mkdir "%ACC_HOME%data\output"
 if not exist "%ACC_HOME%data\sessions" mkdir "%ACC_HOME%data\sessions"
 echo.
 
-REM Jalankan Webhook Server di window baru (minimized)
-echo  [*] Menjalankan Webhook Server di background...
+REM ── PENTING: Matikan server LAMA yang masih pegang port 5000 ──
+echo  [*] Menutup server lama (jika ada)...
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5000" ^| findstr "LISTENING"') do (
+    echo      Menutup proses lama PID %%P
+    taskkill /F /PID %%P >nul 2>&1
+)
+REM Tutup juga window webhook lama berdasarkan judul
+taskkill /F /FI "WINDOWTITLE eq ACC-Webhook*" >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+REM Jalankan Webhook Server BARU di window baru (minimized)
+echo  [*] Menjalankan Webhook Server (versi terbaru)...
 start "ACC-Webhook" /min "%PYEXE%" "%ACC_HOME%src\webhook_server.py"
 
 REM Tunggu server siap

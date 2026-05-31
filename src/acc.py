@@ -79,8 +79,11 @@ def build_system_prompt(skill: str = None) -> str:
     """Gabungkan konteks waktu + SOUL + DESIGN + PROFIL + skill menjadi system prompt."""
     # Konteks waktu Jakarta selalu disertakan di awal
     time_ctx = (
-        "## Konteks Waktu\n"
+        "## INFORMASI WAKTU REAL-TIME (WAJIB DIPAKAI)\n"
+        "Sistem ini memberi kamu akses waktu nyata. JANGAN PERNAH bilang "
+        "kamu tidak tahu jam/tanggal. Gunakan data berikut langsung:\n\n"
         + get_jakarta_datetime()
+        + "\n\nJika ditanya jam/tanggal/hari, jawab langsung pakai data di atas."
     )
     parts = [time_ctx, read_md(AGENT_DIR / "SOUL.md"), read_md(AGENT_DIR / "DESIGN.md")]
 

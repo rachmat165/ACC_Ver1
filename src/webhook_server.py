@@ -269,14 +269,19 @@ def create_app():
                 log_cmd(cmd)
                 return _twiml(cmd)
 
-        # ── Query AI → kosong ke Twilio, proses di background ──
+        # ── Query AI → balas "Memproses" dulu, AI di background ──
         print(f"  {dim('→ Background AI thread dimulai...')}")
         threading.Thread(target=ai_worker,
                          args=(phone, name, body, mgr),
                          daemon=True).start()
 
-        # Balas KOSONG ke Twilio (< 1 detik) → hindari timeout 15s
-        return _twiml()
+        skill_txt = f"\nSkill: _{session.skill}_" if session.skill else ""
+        ack = (f"⏳ *Sedang memproses...*\n"
+               f"🧠 {model}{skill_txt}\n\n"
+               f"_Mohon tunggu, jawaban menyusul dalam beberapa detik..._")
+        log_cmd("[ACK] Memproses...")
+        # Pesan ini muncul cepat (<1s), jawaban lengkap menyusul via REST API
+        return _twiml(ack)
 
     @app.route("/files/<path:fn>", methods=["GET"])
     def serve_file(fn):

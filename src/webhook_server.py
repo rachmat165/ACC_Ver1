@@ -51,6 +51,13 @@ try:
 except ImportError:
     BOT_OK = False
 
+try:
+    from wa_format import to_whatsapp
+    WAFMT_OK = True
+except ImportError:
+    WAFMT_OK = False
+    def to_whatsapp(t): return t
+
 # ── ANSI ─────────────────────────────────────────────────────
 os.system("")
 def _c(t,c): return f"\033[{c}m{t}\033[0m"
@@ -223,22 +230,27 @@ def ai_worker(phone: str, name: str, body: str, mgr, fmt: str = "wa"):
 
         if fmt == "pdf" and BOT_OK:
             print(f"  {dim('Membuat PDF...')}")
+            # PDF pakai markdown asli (pdf_generator yang format)
             file_msg = bot.make_pdf(session, ACC_HOME)
-            preview  = reply[:600] + ("\n\n_..._" if len(reply) > 600 else "")
+            # Preview di WA tetap dirapikan ke format WhatsApp
+            preview_raw = reply[:500] + ("\n\n_..._" if len(reply) > 500 else "")
+            preview = to_whatsapp(preview_raw)
             send_wa(phone, f"{preview}\n\n{file_msg}")
 
         elif fmt == "txt" and BOT_OK:
             print(f"  {dim('Membuat TXT...')}")
             file_msg = bot.make_txt(session, ACC_HOME)
-            preview  = reply[:600] + ("\n\n_..._" if len(reply) > 600 else "")
+            preview_raw = reply[:500] + ("\n\n_..._" if len(reply) > 500 else "")
+            preview = to_whatsapp(preview_raw)
             send_wa(phone, f"{preview}\n\n{file_msg}")
 
-        else:  # wa
-            if len(reply) > 6000:
-                reply += ("\n\n💡 _Jawaban panjang. Ketik /pdf atau /txt untuk "
-                          "versi file rapi yang bisa diunduh._")
-            print(f"  {dim('Mengirim hasil via WhatsApp...')}")
-            send_wa(phone, reply)
+        else:  # wa — rapikan markdown ke format WhatsApp
+            wa_reply = to_whatsapp(reply)
+            if len(wa_reply) > 6000:
+                wa_reply += ("\n\n💡 _Jawaban panjang. Ketik /pdf atau /txt untuk "
+                             "versi file rapi yang bisa diunduh._")
+            print(f"  {dim('Mengirim hasil (format WhatsApp)...')}")
+            send_wa(phone, wa_reply)
 
     except Exception as e:
         log_err(f"ai_worker crash: {e}")

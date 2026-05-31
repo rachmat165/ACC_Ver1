@@ -246,7 +246,7 @@ def generate_txt_from_text(
     out.append(f"Dibuat: {datetime.now().strftime('%d %B %Y, %H:%M')} WIB".center(W))
     out.append("=" * W)
     out.append("")
-    out.append(judul.upper().center(W))
+    out.append(judul.center(W))
     out.append("-" * W)
     out.append("")
 
@@ -255,11 +255,11 @@ def generate_txt_from_text(
             out.append("")
         elif style == "h1":
             out.append("")
-            out.append("#" * 3 + " " + text.upper())
-            out.append("=" * min(len(text) + 4, W))
+            out.append("=== " + text + " ===")
+            out.append("=" * min(len(text) + 8, W))
         elif style == "h2":
             out.append("")
-            out.append(">> " + text.upper())
+            out.append(">> " + text)
             out.append("-" * min(len(text) + 3, W))
         elif style == "h3":
             out.append("")

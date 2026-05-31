@@ -1,97 +1,85 @@
 @echo off
 REM ============================================================
-REM  ARUNIKA COMMAND CENTRE - ONE CLICK START
+REM  ARUNIKA COMMAND CENTRE - START WEBHOOK SERVER
 REM  PT. Arunika Teknologi Global
 REM
-REM  Double-klik file ini untuk jalankan semua sekaligus:
-REM    1. Cek / install Python portable
-REM    2. Pasang semua dependensi Python
-REM    3. Jalankan Webhook Server (port 5000)
-REM    4. Jalankan ngrok (ekspos ke internet)
-REM    5. Tampilkan URL untuk Twilio + salin ke clipboard
+REM  Prasyarat: Python portable sudah ada di .cache\python\
+REM            (auto-installed oleh launch.bat sebelumnya)
 REM ============================================================
 setlocal enabledelayedexpansion
-
 cd /d "%~dp0"
-set "ACC_HOME=%cd%"
-set "LOG_FILE=%ACC_HOME%\START_LOG.txt"
-
-REM Clear log file
-echo. > "%LOG_FILE%"
-echo ============================================================ >> "%LOG_FILE%"
-echo  ARUNIKA COMMAND CENTRE - STARTUP LOG >> "%LOG_FILE%"
-echo  Waktu: %date% %time% >> "%LOG_FILE%"
-echo ============================================================ >> "%LOG_FILE%"
-echo. >> "%LOG_FILE%"
+set "ACC_HOME=%~dp0"
+set "PYDIR=%ACC_HOME%.cache\python"
+set "PYEXE=%PYDIR%\python.exe"
 
 cls
 echo.
 echo  ╔══════════════════════════════════════════════════╗
-echo  ║  ARUNIKA COMMAND CENTRE - ONE CLICK START        ║
-echo  ║  PT. Arunika Teknologi Global                    ║
+echo  ║   ARUNIKA COMMAND CENTRE                         ║
+echo  ║   WhatsApp Webhook Server                        ║
+echo  ║   PT. Arunika Teknologi Global                   ║
 echo  ╚══════════════════════════════════════════════════╝
 echo.
-echo  Inisialisasi...
-echo. >> "%LOG_FILE%"
 
-REM Cek PowerShell tersedia
-powershell.exe -NoProfile -Command "exit 0" >nul 2>&1
-if errorlevel 1 (
-    echo. >> "%LOG_FILE%"
-    echo [ERROR] PowerShell tidak ditemukan atau tidak bisa dijalankan >> "%LOG_FILE%"
-    echo. >> "%LOG_FILE%"
-    echo [ERROR] PowerShell tidak ditemukan!
+REM ─── Cek Python ───────────────────────────────────────
+if not exist "%PYEXE%" (
+    echo  [X] Python portable tidak ditemukan!
+    echo      Lokasi: %PYDIR%
     echo.
     echo  Solusi:
-    echo    - Windows 7/8: Upgrade ke PowerShell 3.0+
-    echo    - Windows 10+: PowerShell seharusnya sudah ada
-    echo    - Cek: Settings ^> Apps ^> Optional features ^> PowerShell
+    echo    - Jalankan launch.bat dulu (akan install Python)
+    echo    - Atau download Python dari python.org
     echo.
     pause
     exit /b 1
 )
 
-REM Jalankan PowerShell script dengan error handling
-echo Menjalankan START.ps1... >> "%LOG_FILE%"
-echo. >> "%LOG_FILE%"
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
-  "try { ^
-     $ErrorActionPreference='Stop'; ^
-     & '%ACC_HOME%\START.ps1' >> '%LOG_FILE%' 2>&1; ^
-   } catch { ^
-     Write-Host \"[ERROR] `$_\" >> '%LOG_FILE%'; ^
-     Write-Host $_.Exception.Message >> '%LOG_FILE%'; ^
-     exit 1; ^
-   }"
-
-set EXITCODE=%ERRORLEVEL%
-
-REM Jika ada error, tampilkan log dan tunggu user
-if %EXITCODE% neq 0 (
-    cls
-    echo.
-    echo  ╔══════════════════════════════════════════════════╗
-    echo  ║  [X] ERROR - STARTUP GAGAL                       ║
-    echo  ╚══════════════════════════════════════════════════╝
-    echo.
-    echo  Detail error (lihat di bawah):
-    echo  ════════════════════════════════════════════════════
-    type "%LOG_FILE%"
-    echo  ════════════════════════════════════════════════════
-    echo.
-    echo  DEBUG: Jika ada error, lapor dengan file ini:
-    echo    %LOG_FILE%
-    echo.
-    pause
-    exit /b %EXITCODE%
-)
-
-REM Jika sukses, tunggu user tutup manual
+echo  [OK] Python ditemukan
+"%PYEXE%" --version
 echo.
+
+REM ─── Cek dependensi ───────────────────────────────────
+echo  Memeriksa dependensi...
+"%PYEXE%" -c "import flask, fpdf, anthropic, twilio" >nul 2>&1
+if errorlevel 1 (
+    echo  [!] Ada paket yang kurang. Memasang...
+    "%PYEXE%" -m pip install -q flask fpdf2 --no-warn-script-location
+    if errorlevel 1 (
+        echo  [X] Gagal install dependensi.
+        echo      Coba jalankan manual di terminal:
+        echo        python -m pip install flask fpdf2
+        echo.
+        pause
+        exit /b 1
+    )
+)
+echo  [OK] Semua dependensi tersedia
+echo.
+
+REM ─── Persiapan folder ─────────────────────────────────
+if not exist "%ACC_HOME%data\output" mkdir "%ACC_HOME%data\output"
+
+REM ─── Jalankan webhook server ──────────────────────────
 echo  ╔══════════════════════════════════════════════════╗
-echo  ║  [OK] SERVER BERJALAN                            ║
-echo  ║  Ctrl+C untuk berhenti                           ║
+echo  ║  STARTING WEBHOOK SERVER (port 5000)             ║
 echo  ╚══════════════════════════════════════════════════╝
+echo.
+echo  Langkah selanjutnya:
+echo    1. Buka terminal BARU
+echo    2. Jalankan: ngrok http 5000
+echo    3. Copy URL ngrok (https://xxxx.ngrok.io)
+echo    4. Tempel ke Twilio Console ^> Sandbox settings
+echo    5. Kirim pesan WhatsApp ke nomor sandbox Twilio
+echo.
+echo  Server berjalan... (Ctrl+C untuk berhenti)
+echo  ─────────────────────────────────────────────────────
+echo.
+
+set "PYTHONPATH=%ACC_HOME%src;%PYTHONPATH%"
+"%PYEXE%" "%ACC_HOME%src\webhook_server.py"
+
+echo.
+echo  ─────────────────────────────────────────────────────
+echo  [OK] Server berhenti.
 echo.
 pause

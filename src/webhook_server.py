@@ -47,6 +47,29 @@ try:
 except ImportError:
     TWIML_OK = False
 
+# ============ VISUAL LOG ============
+_ANSI = {
+    "cyan": "\033[96m", "green": "\033[92m", "yellow": "\033[93m",
+    "magenta": "\033[95m", "dim": "\033[2m", "bold": "\033[1m", "reset": "\033[0m",
+}
+
+def _c(text, *colors):
+    codes = "".join(_ANSI.get(c, "") for c in colors)
+    return f"{codes}{text}{_ANSI['reset']}"
+
+def _log_incoming(ts, name, phone, body):
+    bar = "─" * 52
+    print(f"\n  {_c(bar, 'dim')}")
+    print(f"  {_c('📨 PESAN MASUK', 'bold', 'cyan')}  {_c(ts, 'dim')}")
+    print(f"  {_c('Dari  :', 'dim')} {_c(name, 'bold')} {_c(f'({phone})', 'dim')}")
+    print(f"  {_c('Isi   :', 'dim')} {body[:120]}")
+
+def _log_reply(ts, label, reply):
+    preview = reply[:100].replace("\n", " ")
+    print(f"  {_c('✔ REPLY', 'bold', 'green')}  {_c(f'({label}, {len(reply)} char)', 'dim')}")
+    print(f"  {_c('Isi   :', 'dim')} {preview}{'...' if len(reply) > 100 else ''}")
+
+
 # Session per nomor HP (simpan riwayat percakapan dalam memori)
 # Format: {phone: {"messages": [...], "skill": str|None, "last_activity": datetime}}
 _sessions: dict = defaultdict(lambda: {"messages": [], "skill": None, "last_activity": None})
@@ -219,36 +242,38 @@ def create_app():
         from_number = request.form.get("From", "").replace("whatsapp:", "")
         body = request.form.get("Body", "").strip()
         sender_name = request.form.get("ProfileName", "").strip() or from_number
+        ts = datetime.now().strftime("%H:%M:%S")
 
         if not body:
             return _twiml_reply("")
 
-        print(f"[{datetime.now():%H:%M:%S}] Dari {sender_name} ({from_number}): {body[:80]}")
+        _log_incoming(ts, sender_name, from_number, body)
 
         # Cek perintah khusus
         special = handle_special_command(from_number, body)
         if special is not None:
-            print(f"  -> Perintah khusus: {special[:60]}")
+            _log_reply(ts, "perintah", special)
             return _twiml_reply(special)
 
         # Chat biasa dengan AI
         session = get_session(from_number)
         skill = session.get("skill")
+        skill_info = f" [{skill}]" if skill else ""
+        print(f"  {'─'*50}")
+        print(f"  ⚙  Memproses via AI{skill_info} ...", flush=True)
 
-        # Indikator skill aktif
-        skill_info = f" [skill: {skill}]" if skill else ""
-        print(f"  -> Memanggil AI{skill_info}...")
-
+        t0 = datetime.now()
         try:
             reply = call_acc_ai(from_number, body, skill)
         except Exception as e:
             reply = f"Maaf, terjadi kesalahan: {e}"
+        elapsed = (datetime.now() - t0).total_seconds()
 
         # Potong jika terlalu panjang (WhatsApp max ~4096 karakter)
         if len(reply) > 3800:
             reply = reply[:3800] + "\n\n_[Respons dipotong. Gunakan /pdf untuk versi lengkap]_"
 
-        print(f"  -> Reply ({len(reply)} char): {reply[:60]}...")
+        _log_reply(ts, f"{elapsed:.1f}s", reply)
         return _twiml_reply(reply)
 
     @app.route("/files/<path:filename>", methods=["GET"])
@@ -289,36 +314,69 @@ def _twiml_reply(text: str) -> Response:
 
 
 # ============ MAIN ============
+def _progress(label: str, pct: int, width: int = 38):
+    filled = int(pct / 100 * width)
+    bar = "█" * filled + "░" * (width - filled)
+    print(f"\r  {_c(bar, 'cyan')} {pct:3d}%  {label}", end="", flush=True)
+    if pct >= 100:
+        print()
+
+
 def main():
+    # Aktifkan ANSI di Windows
+    os.system("")
+
     if not FLASK_OK:
-        print("[X] Flask belum terpasang. Jalankan: pip install flask")
+        print(f"  {_c('[X]', 'yellow')} Flask belum terpasang. Jalankan: pip install flask")
         sys.exit(1)
 
     port = int(os.environ.get("ACC_WEBHOOK_PORT", 5000))
     debug = os.environ.get("ACC_DEBUG", "false").lower() == "true"
+    output_dir = ACC_HOME / "data" / "output"
 
-    print("=" * 55)
-    print("  ACC WHATSAPP WEBHOOK SERVER")
-    print("  PT. Arunika Teknologi Global")
-    print("=" * 55)
-    print(f"  Port          : {port}")
-    print(f"  Output dir    : {ACC_HOME / 'data' / 'output'}")
-    print()
-    print("  LANGKAH SELANJUTNYA:")
-    print("  1. Buka terminal baru, jalankan: ngrok http 5000")
-    print("  2. Copy URL ngrok (https://xxxx.ngrok.io)")
-    print("  3. Buka Twilio Console -> Messaging -> Sandbox settings")
-    print("  4. Tempel URL + /webhook/whatsapp di field webhook")
-    print("     Contoh: https://xxxx.ngrok.io/webhook/whatsapp")
-    print("  5. Kirim pesan WhatsApp ke sandbox Twilio")
-    print("=" * 55)
-    print()
+    # ── Header ────────────────────────────────────────────────
+    print(_c("\n  ╔══════════════════════════════════════════════════╗", "cyan"))
+    print(_c("  ║   ACC WHATSAPP WEBHOOK SERVER                    ║", "bold"))
+    print(_c("  ║   PT. Arunika Teknologi Global                   ║", "cyan"))
+    print(_c("  ╚══════════════════════════════════════════════════╝\n", "cyan"))
 
-    # Pastikan folder output ada
-    (ACC_HOME / "data" / "output").mkdir(parents=True, exist_ok=True)
+    # ── Progress startup ──────────────────────────────────────
+    import time
+    steps = [
+        ("Memuat konfigurasi .env ...", 0.1),
+        ("Memeriksa folder output ...", 0.1),
+        ("Memuat modul ACC ...", 0.3),
+        ("Inisialisasi session store ...", 0.1),
+        ("Menyiapkan Flask app ...", 0.2),
+        ("Server siap!", 0.0),
+    ]
+    for i, (label, delay) in enumerate(steps):
+        pct = int((i + 1) / len(steps) * 100)
+        _progress(label, pct)
+        time.sleep(delay)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print()
+    print(f"  {_c('●', 'green')} Port       : {_c(str(port), 'bold')}")
+    print(f"  {_c('●', 'green')} Output dir : {_c(str(output_dir), 'dim')}")
+    print(f"  {_c('●', 'green')} Debug      : {debug}")
+    print()
+    print(f"  {_c('┌─ CARA MENGHUBUNGKAN KE WHATSAPP ──────────────────┐', 'dim')}")
+    print(f"  {_c('│', 'dim')} 1. Jalankan ngrok di terminal lain: ngrok http {port}  {_c('│', 'dim')}")
+    print(f"  {_c('│', 'dim')} 2. Copy URL: https://xxxx.ngrok.io                {_c('│', 'dim')}")
+    print(f"  {_c('│', 'dim')} 3. Twilio Console -> Sandbox settings -> Webhook: {_c('│', 'dim')}")
+    print(f"  {_c('│', 'dim')}    https://xxxx.ngrok.io/webhook/whatsapp         {_c('│', 'dim')}")
+    print(f"  {_c('│', 'dim')} 4. Kirim pesan WhatsApp ke nomor sandbox Twilio   {_c('│', 'dim')}")
+    print(f"  {_c('└────────────────────────────────────────────────────┘', 'dim')}")
+    print(f"\n  {_c('Menunggu pesan WhatsApp...', 'dim')} (Ctrl+C untuk berhenti)\n")
 
     app = create_app()
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    # Sembunyikan banner Flask bawaan
+    import logging
+    log = logging.getLogger("werkzeug")
+    log.setLevel(logging.WARNING)
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)
 
 
 if __name__ == "__main__":

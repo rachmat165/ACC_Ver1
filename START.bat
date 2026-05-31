@@ -94,13 +94,14 @@ if exist "%NGROK_EXE%" (
     goto :NGROK_READY
 )
 
-REM Download ngrok
+REM Download ngrok - tulis ke file PS1 dulu agar tidak ada masalah karakter ^ di batch
 echo        ngrok belum ada, mengunduh (~20 MB)...
 if not exist "%NGROK_DIR%" mkdir "%NGROK_DIR%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; ^
-   Invoke-WebRequest -Uri 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip' ^
-   -OutFile '%NGROK_ZIP%' -UseBasicParsing"
+set "DL_SCRIPT=%TEMP%\acc_dl_ngrok.ps1"
+echo [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12 > "%DL_SCRIPT%"
+echo Invoke-WebRequest -Uri 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip' -OutFile '%NGROK_ZIP%' -UseBasicParsing >> "%DL_SCRIPT%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%DL_SCRIPT%"
+del "%DL_SCRIPT%" >nul 2>&1
 if not exist "%NGROK_ZIP%" (
     echo        [X] Gagal download ngrok. Cek koneksi internet.
     echo.
@@ -130,10 +131,7 @@ set /a WAIT=0
 set "NGROK_URL="
 :WAIT_NGROK
 timeout /t 1 /nobreak >nul
-for /f "delims=" %%U in ('powershell -NoProfile -Command ^
-  "try { $t=(Invoke-RestMethod http://localhost:4040/api/tunnels -EA Stop).tunnels; ^
-   $h=$t^|?{$_.proto -eq 'https'}^|Select -First 1; ^
-   if($h){$h.public_url}else{''} } catch {''}"') do set "NGROK_URL=%%U"
+for /f "delims=" %%U in ('powershell -NoProfile -Command "try{$t=(Invoke-RestMethod http://localhost:4040/api/tunnels -EA Stop).tunnels;$h=$t|?{$_.proto -eq 'https'}|Select -First 1;if($h){$h.public_url}else{''}}catch{''}"') do set "NGROK_URL=%%U"
 if "!NGROK_URL!"=="" (
     set /a WAIT+=1
     if !WAIT! lss 15 goto :WAIT_NGROK
@@ -213,8 +211,7 @@ powershell -NoProfile -Command "try { $r=New-Object Net.Sockets.TcpClient; $r.Co
 
 REM Update URL ngrok jika berubah (setelah reconnect)
 if not "!NGROK_URL!"=="" (
-    for /f "delims=" %%U in ('powershell -NoProfile -Command ^
-      "try{(Invoke-RestMethod http://localhost:4040/api/tunnels -EA Stop).tunnels^|?{$_.proto -eq 'https'}^|Select -ExpandProperty public_url -First 1}catch{''}"') do (
+    for /f "delims=" %%U in ('powershell -NoProfile -Command "try{(Invoke-RestMethod http://localhost:4040/api/tunnels -EA Stop).tunnels|?{$_.proto -eq 'https'}|Select -ExpandProperty public_url -First 1}catch{''}"') do (
         if not "%%U"=="" if not "%%U"=="!NGROK_URL!" (
             set "NGROK_URL=%%U"
             set "WEBHOOK_URL=%%U/webhook/whatsapp"

@@ -83,6 +83,21 @@ MODEL_ALIASES: dict[str, str] = {
     "lmstudio": "local",
 }
 
+# Urutan model untuk penomoran menu (1,2,3,...)
+MODEL_ORDER = list(MODELS.keys())
+
+# Sub-model OpenRouter populer (dipilih setelah memilih OpenRouter)
+OPENROUTER_SUBMODELS = [
+    ("Claude Sonnet 4.5",  "anthropic/claude-sonnet-4-5",  "🟣"),
+    ("Claude Opus 4.8",    "anthropic/claude-opus-4-8",    "💜"),
+    ("GPT-4o",             "openai/gpt-4o",                "🟢"),
+    ("GPT-4o mini",        "openai/gpt-4o-mini",           "🟢"),
+    ("Gemini 2.0 Flash",   "google/gemini-2.0-flash-001",  "🔶"),
+    ("Llama 3.3 70B",      "meta-llama/llama-3.3-70b-instruct", "🦙"),
+    ("DeepSeek V3",        "deepseek/deepseek-chat",       "🐳"),
+    ("Qwen 2.5 72B",       "qwen/qwen-2.5-72b-instruct",   "🀄"),
+]
+
 LINE = "━" * 24
 
 
@@ -166,20 +181,93 @@ def fmt_menu(acc_home: Path, session) -> str:
 
 
 def fmt_model_menu(current_key: str) -> str:
+    """Menu model bernomor 1,2,3,..."""
     current = MODELS.get(current_key, {})
     lines = []
-    for key, m in MODELS.items():
-        mark = " ✅ *[AKTIF]*" if key == current_key else ""
-        lines.append(f"{m['icon']} *{m['label']}*{mark}\n   /model {key} — {m['desc']}")
+    for i, key in enumerate(MODEL_ORDER, start=1):
+        m = MODELS[key]
+        mark = " ✅" if key == current_key else ""
+        lines.append(f"*{i}.* {m['icon']} *{m['label']}*{mark}\n     _{m['desc']}_")
 
     return (
         f"🧠 *PILIH MODEL AI*\n"
         f"{LINE}\n"
         f"Aktif: *{current.get('label', current_key)}*\n\n"
-        + "\n\n".join(lines)
+        + "\n".join(lines)
         + f"\n\n{LINE}\n"
-        f"Kirim */model <nama>* untuk ganti\n"
-        f"Contoh: */model claude-haiku*"
+        f"*Balas dengan angka* (mis. *3*)\n"
+        f"_OpenRouter (no.5) punya sub-pilihan model._"
+    )
+
+
+def fmt_submodel_menu() -> str:
+    """Menu sub-model OpenRouter bernomor."""
+    lines = []
+    for i, (label, _mid, icon) in enumerate(OPENROUTER_SUBMODELS, start=1):
+        lines.append(f"*{i}.* {icon} *{label}*")
+    return (
+        f"🌐 *PILIH SUB-MODEL OPENROUTER*\n"
+        f"{LINE}\n"
+        + "\n".join(lines)
+        + f"\n\n{LINE}\n"
+        f"*Balas dengan angka* (mis. *1*)"
+    )
+
+
+def parse_number(text: str, max_n: int) -> int | None:
+    """Ambil angka 1..max_n dari input. None jika tidak valid."""
+    t = text.strip()
+    if t.isdigit():
+        n = int(t)
+        if 1 <= n <= max_n:
+            return n
+    return None
+
+
+def set_model_by_number(n: int, session, session_mgr) -> tuple[str, bool]:
+    """
+    Pilih model berdasarkan nomor menu.
+    Return (pesan, butuh_submenu).
+    butuh_submenu=True jika model = OpenRouter (perlu pilih sub-model).
+    """
+    if not (1 <= n <= len(MODEL_ORDER)):
+        return ("❌ Nomor tidak valid.", False)
+    key = MODEL_ORDER[n - 1]
+    m = MODELS[key]
+
+    # OpenRouter → tampilkan sub-menu
+    if key == "openrouter":
+        session.model_key = key
+        session.pending = {"action": "choose_submodel"}
+        session_mgr.save(session)
+        return (fmt_submodel_menu(), True)
+
+    session.model_key = key
+    session.model_config = {"provider": m["provider"], "model": m["model"]}
+    session.pending = None
+    session_mgr.save(session)
+    return (
+        f"✅ Model berganti ke *{m['label']}*\n"
+        f"{m['icon']} {m['desc']}\n\n"
+        f"Percakapan selanjutnya menggunakan model ini.",
+        False
+    )
+
+
+def set_submodel_by_number(n: int, session, session_mgr) -> str:
+    """Pilih sub-model OpenRouter berdasarkan nomor."""
+    if not (1 <= n <= len(OPENROUTER_SUBMODELS)):
+        return "❌ Nomor tidak valid."
+    label, model_id, icon = OPENROUTER_SUBMODELS[n - 1]
+    session.model_key = "openrouter"
+    session.model_config = {"provider": "openrouter", "model": model_id}
+    session.pending = None
+    session_mgr.save(session)
+    return (
+        f"✅ OpenRouter aktif dengan model:\n"
+        f"{icon} *{label}*\n"
+        f"_{model_id}_\n\n"
+        f"Percakapan selanjutnya menggunakan model ini."
     )
 
 
@@ -482,6 +570,32 @@ def handle(phone: str, name: str, body: str,
     text = body.strip()
     lower = text.lower()
 
+    # ── State: sedang memilih MODEL (angka) ──────────────────
+    if session.pending and session.pending.get("action") == "choose_model":
+        # Batalkan jika user ketik command lain
+        if text.startswith("/"):
+            session.pending = None
+            session_mgr.save(session)
+        else:
+            n = parse_number(text, len(MODEL_ORDER))
+            if n:
+                msg, _need_sub = set_model_by_number(n, session, session_mgr)
+                return msg
+            return (f"❌ Masukkan angka *1*–*{len(MODEL_ORDER)}* untuk pilih model.\n\n"
+                    + fmt_model_menu(session.model_key))
+
+    # ── State: sedang memilih SUB-MODEL OpenRouter (angka) ───
+    if session.pending and session.pending.get("action") == "choose_submodel":
+        if text.startswith("/"):
+            session.pending = None
+            session_mgr.save(session)
+        else:
+            n = parse_number(text, len(OPENROUTER_SUBMODELS))
+            if n:
+                return set_submodel_by_number(n, session, session_mgr)
+            return (f"❌ Masukkan angka *1*–*{len(OPENROUTER_SUBMODELS)}*.\n\n"
+                    + fmt_submodel_menu())
+
     # ── /start, halo ─────────────────────────────────────────
     if lower in ("/start", "start", "/halo", "halo", "/hai", "hai",
                  "/hi", "hi", "/hello", "hello"):
@@ -524,9 +638,13 @@ def handle(phone: str, name: str, body: str,
 
     # ── /model [nama] ────────────────────────────────────────
     if lower in ("/model", "/models"):
+        # Set pending agar balasan angka berikutnya dipahami sbg pilihan
+        session.pending = {"action": "choose_model"}
+        session_mgr.save(session)
         return fmt_model_menu(session.model_key)
 
     if lower.startswith("/model "):
+        # Masih dukung cara lama: /model claude-haiku (pakai nama/alias)
         return set_model(text[7:].strip(), session, session_mgr)
 
     # ── /format [wa|pdf|txt|ask] ─────────────────────────────
@@ -552,11 +670,8 @@ def handle(phone: str, name: str, body: str,
         return make_pdf(session, acc_home)
 
     if lower.startswith("/pdf "):
-        # Ada teks tambahan -> proses AI dulu, lalu PDF
-        # Tandai pending agar webhook_server tahu harus generate PDF
-        session.pending = "pdf"
-        session_mgr.save(session)
-        return None  # lanjut ke AI dengan body = teks setelah /pdf
+        # Ditangani langsung oleh webhook_server (start AI worker format=pdf)
+        return None
 
     # ── Perintah tidak dikenal ───────────────────────────────
     if text.startswith("/"):

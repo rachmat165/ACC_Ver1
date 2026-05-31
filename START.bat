@@ -77,56 +77,95 @@ echo        [!] Server lambat start, lanjutkan...
 :SERVER_READY
 echo  [3/5] OK - Webhook Server aktif di http://127.0.0.1:%ACC_WEBHOOK_PORT%
 
-REM ── STEP 5: Cek / Download ngrok ────────────────────────
-echo  [4/5] Memeriksa ngrok...
+REM ── STEP 5: Cek / Download Cloudflare Tunnel (tanpa daftar/authtoken) ─
+set "CF_EXE=%ACC_HOME%.cache\cloudflared\cloudflared.exe"
+set "CF_DIR=%ACC_HOME%.cache\cloudflared"
 
-REM Cek ngrok di sistem (PATH)
+echo  [4/5] Memeriksa tunnel tool...
+
+REM Cek cloudflared di sistem
+where cloudflared.exe >nul 2>&1
+if not errorlevel 1 (
+    for /f "tokens=*" %%N in ('where cloudflared.exe') do set "CF_EXE=%%N"
+    echo  [4/5] OK - cloudflared ditemukan di sistem
+    goto :CF_READY
+)
+
+REM Cek cloudflared di cache
+if exist "%CF_EXE%" (
+    echo  [4/5] OK - cloudflared ditemukan di cache
+    goto :CF_READY
+)
+
+REM Cek ngrok (fallback)
 where ngrok.exe >nul 2>&1
 if not errorlevel 1 (
     for /f "tokens=*" %%N in ('where ngrok.exe') do set "NGROK_EXE=%%N"
     echo  [4/5] OK - ngrok ditemukan di sistem
     goto :NGROK_READY
 )
-
-REM Cek ngrok di cache
 if exist "%NGROK_EXE%" (
     echo  [4/5] OK - ngrok ditemukan di cache
     goto :NGROK_READY
 )
 
-REM Download ngrok - tulis ke file PS1 dulu agar tidak ada masalah karakter ^ di batch
-echo        ngrok belum ada, mengunduh (~20 MB)...
-if not exist "%NGROK_DIR%" mkdir "%NGROK_DIR%"
-set "DL_SCRIPT=%TEMP%\acc_dl_ngrok.ps1"
+REM Download cloudflared (tidak butuh akun/authtoken, gratis)
+echo        Mengunduh Cloudflare Tunnel (~35 MB, tanpa akun)...
+if not exist "%CF_DIR%" mkdir "%CF_DIR%"
+set "DL_SCRIPT=%TEMP%\acc_dl_cf.ps1"
 echo [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12 > "%DL_SCRIPT%"
-echo Invoke-WebRequest -Uri 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip' -OutFile '%NGROK_ZIP%' -UseBasicParsing >> "%DL_SCRIPT%"
+echo Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile '%CF_EXE%' -UseBasicParsing >> "%DL_SCRIPT%"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%DL_SCRIPT%"
 del "%DL_SCRIPT%" >nul 2>&1
-if not exist "%NGROK_ZIP%" (
-    echo        [X] Gagal download ngrok. Cek koneksi internet.
-    echo.
-    echo        Download manual: https://ngrok.com/download
-    echo        Ekstrak ngrok.exe ke: %NGROK_DIR%\
-    echo.
-    goto :NO_NGROK
+
+if exist "%CF_EXE%" (
+    echo  [4/5] OK - Cloudflare Tunnel berhasil diunduh
+    goto :CF_READY
 )
-powershell -NoProfile -Command "Expand-Archive -Path '%NGROK_ZIP%' -DestinationPath '%NGROK_DIR%' -Force"
-del "%NGROK_ZIP%" >nul 2>&1
-if exist "%NGROK_EXE%" (
-    echo  [4/5] OK - ngrok berhasil diunduh
-    goto :NGROK_READY
-)
-:NO_NGROK
-echo  [4/5] SKIP - Jalankan ngrok manual di terminal baru
+
+echo  [4/5] SKIP - Unduh gagal, lanjut tanpa tunnel otomatis
 goto :SHOW_MANUAL
 
-REM ── STEP 6: Jalankan ngrok ──────────────────────────────
+REM ── Jalankan cloudflared ────────────────────────────────
+:CF_READY
+echo  [5/5] Menjalankan Cloudflare Tunnel...
+start "ACC-cloudflared" /min cmd /c ""%CF_EXE%" tunnel --url http://localhost:%ACC_WEBHOOK_PORT% 2>&1"
+
+REM Tunggu URL dari cloudflared (baca dari log lewat API lokal tidak tersedia,
+REM cloudflared cetak URL ke stderr, perlu cara lain: baca dari file log)
+set "CF_LOG=%TEMP%\acc_cf_tunnel.log"
+start "ACC-cloudflared" /min cmd /c ""%CF_EXE%" tunnel --url http://localhost:%ACC_WEBHOOK_PORT% > "%CF_LOG%" 2>&1"
+
+echo        Menunggu tunnel URL (max 20 detik)...
+set /a WAIT=0
+set "NGROK_URL="
+:WAIT_CF
+timeout /t 2 /nobreak >nul
+if exist "%CF_LOG%" (
+    for /f "tokens=*" %%L in ('findstr /i "trycloudflare.com" "%CF_LOG%" 2^>nul') do (
+        for /f "tokens=2" %%U in ("%%L") do (
+            if not "%%U"=="" set "NGROK_URL=%%U"
+        )
+    )
+)
+if "!NGROK_URL!"=="" (
+    set /a WAIT+=2
+    if !WAIT! lss 20 goto :WAIT_CF
+)
+if "!NGROK_URL!"=="" (
+    echo        [!] Tunnel URL tidak terdeteksi otomatis.
+    goto :SHOW_MANUAL
+)
+goto :GOT_URL
+
+REM ── Jalankan ngrok (fallback) ───────────────────────────
 :NGROK_READY
 echo  [5/5] Menjalankan ngrok...
+echo        CATATAN: ngrok v3 butuh authtoken gratis dari ngrok.com
+echo        Jika gagal, daftar di https://ngrok.com lalu:
+echo        %NGROK_EXE% config add-authtoken TOKEN_ANDA
 start "ACC-ngrok" /min cmd /c ""%NGROK_EXE%" http %ACC_WEBHOOK_PORT%"
 
-REM Tunggu ngrok siap (max 15 detik)
-echo        Menunggu ngrok tunnel...
 set /a WAIT=0
 set "NGROK_URL="
 :WAIT_NGROK
@@ -137,9 +176,11 @@ if "!NGROK_URL!"=="" (
     if !WAIT! lss 15 goto :WAIT_NGROK
 )
 if "!NGROK_URL!"=="" (
-    echo        [!] Ngrok URL tidak terdeteksi.
+    echo        [!] ngrok URL tidak terdeteksi. Cek window ngrok di taskbar.
     goto :SHOW_MANUAL
 )
+
+:GOT_URL
 
 REM ── HASIL AKHIR ─────────────────────────────────────────
 set "WEBHOOK_URL=!NGROK_URL!/webhook/whatsapp"
